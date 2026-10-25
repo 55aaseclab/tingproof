@@ -56,3 +56,45 @@ describe("IssuePanel 跳转播放", () => {
     expect(onJumpPlay).toHaveBeenCalledWith("seg-9");
   });
 });
+
+describe("新建疑点表单：类型复位（PRD V1.0.3）", () => {
+  function renderPanel(onCreate = vi.fn()) {
+    render(
+      <IssuePanel
+        issues={[issue]}
+        segments={[seg]}
+        activeId="seg-9"
+        onJumpPlay={vi.fn()}
+        onResolve={vi.fn()}
+        onDelete={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+    const openBtn = () => screen.getByRole("button", { name: "为当前段新建疑点（表单）" });
+    const typeSelect = () => screen.getByLabelText("疑点类型") as HTMLSelectElement;
+    return { openBtn, typeSelect, onCreate };
+  }
+
+  it("改选其他类型后取消，再次新建恢复为听不清", () => {
+    const { openBtn, typeSelect } = renderPanel();
+    fireEvent.click(openBtn());
+    expect(typeSelect().value).toBe("unclear"); // 初始默认
+    fireEvent.change(typeSelect(), { target: { value: "proper_noun" } }); // 改选专名
+    expect(typeSelect().value).toBe("proper_noun");
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(openBtn()); // 再次新建
+    expect(typeSelect().value).toBe("unclear"); // 必须复位，不得沿用专名
+  });
+
+  it("改选其他类型并保存，再次新建恢复为听不清", () => {
+    const onCreate = vi.fn();
+    const { openBtn, typeSelect } = renderPanel(onCreate);
+    fireEvent.click(openBtn());
+    fireEvent.change(typeSelect(), { target: { value: "number" } }); // 改选数字
+    fireEvent.click(screen.getByRole("button", { name: "保存疑点" }));
+    expect(onCreate).toHaveBeenCalledWith("seg-9", "number", "blocking", "");
+    expect(screen.queryByLabelText("疑点类型")).toBeNull(); // 表单已关闭
+    fireEvent.click(openBtn()); // 再次新建
+    expect(typeSelect().value).toBe("unclear"); // 必须复位，不得沿用数字
+  });
+});

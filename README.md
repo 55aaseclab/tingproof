@@ -48,7 +48,7 @@ npm run preview      # 预览构建产物（http://localhost:4173）
 | 命令 | 结果 |
 | --- | --- |
 | `npm run lint`（tsc + eslint） | 通过，0 错误 |
-| `npm test` | 19 个文件 **162 个用例全部通过**（含 jsdom harness：选中订阅、周期持久化、usePlayer 段内播放与循环 rAF 链、SegmentList 行内交互、IssuePanel 跳转播放） |
+| `npm test` | 19 个文件 **164 个用例全部通过**（含 jsdom harness：选中订阅、周期持久化、usePlayer 段内播放与循环 rAF 链、SegmentList 行内交互、IssuePanel 跳转播放与新建疑点类型每次重置） |
 | `npm run build` | 成功 |
 | `npm run preview` | 构建产物 HTTP 200、页面与 JS 资源可访问（**仅验证服务与构建产物可访问，不等于播放/交互验证**） |
 

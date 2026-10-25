@@ -1,7 +1,7 @@
 /**
  * 疑点面板：标记/筛选/跳转/解决/删除；未解决数量由工作台顶栏同步显示。
  */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { formatDisplay } from "../core/time.js";
 import {
   ISSUE_TYPE_LABEL,
@@ -41,6 +41,17 @@ export function IssuePanel({
   const [formSeverity, setFormSeverity] = useState<IssueSeverity>("blocking");
   const [formNote, setFormNote] = useState("");
 
+  /**
+   * 打开新建疑点表单（PRD V1.0.3）：
+   * 疑点类型必须重置为默认“听不清”，不得沿用上一次保存或取消前选择的专名、数字等类型；
+   * 表单打开后用户仍可改选。
+   */
+  const openIssueForm = useCallback(() => {
+    if (!activeId) return;
+    setFormType("unclear");
+    setFormFor(activeId);
+  }, [activeId]);
+
   const visible = openOnly ? issues.filter((i) => i.status === "open") : issues;
   const unresolvedCount = issues.filter((i) => i.status === "open").length;
   const blockingCount = issues.filter((i) => i.status === "open" && i.severity === "blocking").length;
@@ -64,7 +75,7 @@ export function IssuePanel({
           <>
             <button
               disabled={!activeId}
-              onClick={() => activeId && setFormFor(activeId)}
+              onClick={openIssueForm}
               title="为当前播放所在字幕段创建带表单的疑点"
             >
               为当前段新建疑点（表单）
