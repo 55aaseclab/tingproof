@@ -127,6 +127,27 @@ describe("usePlaybackSelection（P0-2 回归）", () => {
     expect(player.subscribeCount).toBe(0);
   });
 
+  it("同一段的重复位置通知只上报一次（避免播放期每帧 setRange churn，审计项 4）", () => {
+    const player = makeFakePlayer(1000);
+    const onTakeover = vi.fn();
+    function Harness2() {
+      usePlaybackSelection(player.subscribeCurrentMs, () => SEGMENTS, onTakeover);
+      return null;
+    }
+    render(<Harness2 />);
+    expect(onTakeover).toHaveBeenCalledTimes(1); // 订阅时立即上报一次
+    act(() => {
+      player.notify(); // 同段同位置：不再上报
+      player.notify();
+    });
+    expect(onTakeover).toHaveBeenCalledTimes(1);
+    act(() => {
+      player.positionMs = 7000; // 进入 s2：上报
+      player.notify();
+    });
+    expect(onTakeover).toHaveBeenCalledTimes(2);
+  });
+
   it("订阅源引用变化才重订阅（vi.fn 计数）", () => {
     const subA = vi.fn().mockImplementation(() => () => undefined);
     const { rerender } = render(<Harness player={{ subscribeCurrentMs: subA, positionMs: 0 }} bump={0} explicitSelect={null} />);

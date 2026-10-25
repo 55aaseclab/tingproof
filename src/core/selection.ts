@@ -70,3 +70,26 @@ export function planConfirm(
     nextId: nextUnreviewedAfter(sortedSegments, segmentId)?.segmentId ?? null,
   };
 }
+
+/** 由 loop region 反查其所属字幕段（loop 标记按真实 range 计算，而非选中段）。 */
+export function segmentIdForRange(
+  sortedSegments: SegmentLike[],
+  range: { startMs: number; endMs: number } | null | undefined,
+): string | null {
+  if (!range) return null;
+  return (
+    sortedSegments.find((s) => s.startMs === range.startMs && s.endMs === range.endMs)
+      ?.segmentId ?? null
+  );
+}
+
+/**
+ * 行内循环开关计划：目标段不是当前选中段时，必须先把它设为当前段/范围
+ * （定位但不自动播放），循环才真正作用在该段上。
+ */
+export function planLoopToggle(
+  currentSelectedId: string | null,
+  targetSegmentId: string,
+): { locateFirst: boolean } {
+  return { locateFirst: currentSelectedId !== targetSegmentId };
+}

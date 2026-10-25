@@ -6,7 +6,7 @@
  * - 导出：空文本段为阻塞项；写出前用 isSameEntry 阻止选中源文件；写出后重新解析回读校验。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePlayer, type LoopRegion } from "../audio/usePlayer.js";
+import { usePlayer } from "../audio/usePlayer.js";
 import { usePlaybackSelection } from "../audio/usePlaybackSelection.js";
 import { usePeriodicPersist } from "../audio/usePeriodicPersist.js";
 import { formatDisplay, formatDuration } from "../core/time.js";
@@ -30,6 +30,8 @@ import { decideRelocate } from "../core/legacyReconnect.js";
 import { safeNavigate } from "../core/navigation.js";
 import {
   planConfirm,
+  planLoopToggle,
+  segmentIdForRange,
 } from "../core/selection.js";
 import { randomUuid, sha256Hex } from "../core/identity.js";
 import {
@@ -348,14 +350,47 @@ export function Workbench({
     setSelectedId(id);
   }, []);
 
-  // 订阅只依赖稳定的 subscribeCurrentMs：纯 selectedId/文本 render 不重订阅，
-  // 不会用暂停中的旧播放位置覆盖用户显式选择的段（审计 P0-2）。
+  /**
+   * 统一选中入口：更新选中段并让活动播放范围（= 该段 [startMs, endMs)）随之。
+   * locate=true 时精确定位到 startMs（无预卷）；pauseIfPlaying=true 时先暂停旧段。
+   */
+  const selectSegment = useCallback(
+    (segmentId: string, opts: { locate?: boolean; pauseIfPlaying?: boolean } = {}) => {
+      const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
+      if (!seg) return;
+      updateSelected(segmentId);
+      playerRef.current.setRange({ startMs: seg.startMs, endMs: seg.endMs });
+      if (opts.pauseIfPlaying && audioRef.current && !audioRef.current.paused) {
+        playerRef.current.pause();
+      }
+      if (opts.locate) playerRef.current.seek(seg.startMs);
+    },
+    [updateSelected],
+  );
+
+  /** 播放接管：只在播放真正进入某段时发生——跟随更新选中与范围，不暂停、不跳转。 */
+  const handlePlaybackTakeover = useCallback(
+    (segmentId: string) => {
+      const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
+      if (!seg) return;
+      updateSelected(segmentId);
+      playerRef.current.setRange({ startMs: seg.startMs, endMs: seg.endMs });
+    },
+    [updateSelected],
+  );
+
   const getSorted = useCallback(() => sortedRef.current, []);
   usePlaybackSelection(
     player.subscribeCurrentMs,
     getSorted,
-    updateSelected,
+    handlePlaybackTakeover,
   );
+
+  // 挂载时为初始选中段建立活动播放范围。
+  useEffect(() => {
+    const first = sortedRef.current[0];
+    if (first) playerRef.current.setRange({ startMs: first.startMs, endMs: first.endMs });
+  }, []);
 
   // 跟随滚动（用户滚轮打断；可点“回到播放点”恢复）。
   useEffect(() => {
@@ -433,38 +468,72 @@ export function Workbench({
       }
       setStatus(plan.confirmedId, "confirmed");
       if (plan.nextId) {
-        updateSelected(plan.nextId);
         if (opts.seekToNext) {
-          const next = sortedRef.current.find((s) => s.segmentId === plan.nextId);
-          if (next) {
-            playerRef.current.seek(Math.max(0, next.startMs - 300));
-            focusSegmentEditor(plan.nextId);
-          }
+          // 保存并确认当前段，选择下一未校对段并精确定位其 start_ms，不自动播放（PRD V1.0.2 §3.3.5）。
+          selectSegment(plan.nextId, { locate: true, pauseIfPlaying: true });
+          setFollow(true);
+          focusSegmentEditor(plan.nextId);
+        } else {
+          // 仅推进选中：同样同步活动播放范围，避免 F8/循环指示指向旧段。
+          selectSegment(plan.nextId, {});
         }
       }
     },
-    [setStatus, focusSegmentEditor, updateSelected],
+    [setStatus, focusSegmentEditor, updateSelected, selectSegment],
   );
 
-  const seekToSegment = useCallback(
-    (segmentId: string, andPlay = false) => {
+  /** 点击条目 / 聚焦文本框 / Alt+←→ / 回到播放点：选中 + 精确定位 startMs；播放中先暂停；不自动播放。 */
+  const handleRowLocate = useCallback(
+    (segmentId: string) => {
+      selectSegment(segmentId, { locate: true, pauseIfPlaying: true });
+      setFollow(true);
+    },
+    [selectSegment],
+  );
+
+  /** 行内播放/暂停开关（双击时间码同）：选中该段并按范围感知规则起播/暂停。 */
+  const handleRowTogglePlay = useCallback(
+    (segmentId: string) => {
       const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
       if (!seg) return;
-      updateSelected(segmentId); // 定位带预卷时也选中目标段
+      updateSelected(segmentId);
       setFollow(true);
-      playerRef.current.seek(Math.max(0, seg.startMs - 300));
-      if (andPlay && audioRef.current?.paused) playerRef.current.togglePlay();
+      playerRef.current.toggleRange({ startMs: seg.startMs, endMs: seg.endMs });
     },
     [updateSelected],
   );
+
+  /** 疑点面板「跳转播放」：选中目标段并从其段首播放（区别于行内播放/暂停开关）。 */
+  const handleJumpPlay = useCallback(
+    (segmentId: string) => {
+      const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
+      if (!seg) return;
+      updateSelected(segmentId);
+      setFollow(true);
+      playerRef.current.playRange({ startMs: seg.startMs, endMs: seg.endMs });
+    },
+    [updateSelected],
+  );
+
+  /** 底部播放按钮与 F8 共用：对当前选中段做范围感知播放/暂停切换。 */
+  const handleMainToggle = useCallback(() => {
+    const seg = sortedRef.current.find((s) => s.segmentId === selectedIdRef.current);
+    if (!seg) return;
+    playerRef.current.toggleRange({ startMs: seg.startMs, endMs: seg.endMs });
+  }, []);
 
   const toggleLoopSegment = useCallback(
     (segmentId: string) => {
       const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
       if (!seg) return;
+      const { locateFirst } = planLoopToggle(selectedIdRef.current, segmentId);
+      if (locateFirst) {
+        // 先让目标段成为当前段/范围（定位但不自动播放），循环才真正作用在该段上。
+        selectSegment(segmentId, { locate: true, pauseIfPlaying: true });
+      }
       playerRef.current.loopSegment(seg.startMs, seg.endMs);
     },
-    [],
+    [selectSegment],
   );
 
   // ---------- 疑点（写入纳入保存协调器） ----------
@@ -583,7 +652,7 @@ export function Workbench({
         if (e.key === keymap.playPause) {
           e.preventDefault();
           e.stopPropagation();
-          playerRef.current.togglePlay();
+          handleMainToggle();
           return;
         }
         if (e.key === keymap.seekBack) {
@@ -607,8 +676,7 @@ export function Workbench({
         const idx = sorted.findIndex((s) => s.segmentId === selectedIdRef.current);
         const prev = sorted[Math.max(0, idx - 1)];
         if (prev) {
-          updateSelected(prev.segmentId);
-          playerRef.current.seek(prev.startMs);
+          handleRowLocate(prev.segmentId);
         }
         return;
       }
@@ -619,8 +687,7 @@ export function Workbench({
         const idx = sorted.findIndex((s) => s.segmentId === selectedIdRef.current);
         const next = sorted[Math.min(sorted.length - 1, idx + 1)];
         if (next) {
-          updateSelected(next.segmentId);
-          playerRef.current.seek(next.startMs);
+          handleRowLocate(next.segmentId);
         }
         return;
       }
@@ -658,7 +725,7 @@ export function Workbench({
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [keymap, applyConfirm, toggleLoopSegment, createIssue, updateSelected]);
+  }, [keymap, applyConfirm, toggleLoopSegment, createIssue, handleRowLocate, handleMainToggle]);
 
   // ---------- 导出 ----------
 
@@ -788,13 +855,12 @@ export function Workbench({
               onEdit={editSegment}
               onCompositionEnd={onCompositionEnd}
               onConfirmRow={(id) => applyConfirm(id, { seekToNext: false })}
-              onFocusRow={updateSelected}
-              onSeek={seekToSegment}
+              onLocate={handleRowLocate}
+              onTogglePlay={handleRowTogglePlay}
+              playingSegmentId={player.playing ? selectedId : null}
               onLoop={toggleLoopSegment}
               onCreateIssue={(id) => createIssue(id, "unclear", "blocking", "")}
-              loopSegmentId={
-                player.loop ? findLoopSegmentId(player.loop, sortedSegments) : null
-              }
+              loopSegmentId={segmentIdForRange(sortedSegments, player.loop)}
             />
           )}
         </div>
@@ -802,7 +868,7 @@ export function Workbench({
           issues={issues}
           segments={sortedSegments}
           activeId={selectedId}
-          onSeek={seekToSegment}
+          onJumpPlay={handleJumpPlay}
           onResolve={resolveIssue}
           onDelete={removeIssue}
           onCreate={createIssue}
@@ -819,8 +885,8 @@ export function Workbench({
         />
         <div className="player-controls">
           <button
-            onClick={player.togglePlay}
-            title={`播放/暂停（${keymap.playPause}）`}
+            onClick={handleMainToggle}
+            title={`播放/暂停当前段（${keymap.playPause}）`}
             aria-label={player.playing ? "暂停" : "播放"}
           >
             {player.playing ? "⏸ 暂停" : "▶ 播放"}
@@ -873,7 +939,7 @@ export function Workbench({
             <button
               onClick={() => {
                 setFollow(true);
-                if (selectedId) seekToSegment(selectedId);
+                if (selectedId) handleRowLocate(selectedId);
               }}
             >
               回到播放点
@@ -913,15 +979,6 @@ function unresolvedBySegment(unresolved: IssueRecord[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const i of unresolved) m.set(i.segmentId, (m.get(i.segmentId) ?? 0) + 1);
   return m;
-}
-
-function findLoopSegmentId(
-  loop: LoopRegion,
-  segments: SegmentRecord[],
-): string | null {
-  return (
-    segments.find((s) => s.startMs === loop.startMs && s.endMs === loop.endMs)?.segmentId ?? null
-  );
 }
 
 function Kbd({ label }: { label: string }) {

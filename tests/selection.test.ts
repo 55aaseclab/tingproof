@@ -11,6 +11,8 @@ import {
   computePlaybackSegmentId,
   nextUnreviewedAfter,
   planConfirm,
+  planLoopToggle,
+  segmentIdForRange,
   type SegmentLike,
 } from "../src/core/selection.js";
 
@@ -101,5 +103,20 @@ describe("nextUnreviewedAfter", () => {
     expect(nextUnreviewedAfter(sorted, "a")).toBeNull();
     const withOpen = [...sorted, seg("c", 400, 500)];
     expect(nextUnreviewedAfter(withOpen, "a")?.segmentId).toBe("c");
+  });
+});
+
+
+describe("segmentIdForRange / planLoopToggle（审计项 3）", () => {
+  it("loop region 反查真实字幕段；不匹配任何段时为 null", () => {
+    expect(segmentIdForRange(SORTED, { startMs: 3600, endMs: 9460 })).toBe("s2");
+    expect(segmentIdForRange(SORTED, { startMs: 1, endMs: 2 })).toBeNull();
+    expect(segmentIdForRange(SORTED, null)).toBeNull();
+  });
+
+  it("行内循环：目标段不是当前选中段时必须先定位（成为当前段/范围），不自动播放", () => {
+    expect(planLoopToggle("s1", "s1")).toEqual({ locateFirst: false });
+    expect(planLoopToggle("s1", "s2")).toEqual({ locateFirst: true });
+    expect(planLoopToggle(null, "s2")).toEqual({ locateFirst: true });
   });
 });

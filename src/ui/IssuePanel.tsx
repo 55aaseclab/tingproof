@@ -15,7 +15,7 @@ interface Props {
   issues: IssueRecord[];
   segments: SegmentRecord[];
   activeId: string | null;
-  onSeek: (segmentId: string, andPlay?: boolean) => void;
+  onJumpPlay: (segmentId: string) => void;
   onResolve: (issueId: string) => void;
   onDelete: (issueId: string) => void;
   onCreate: (segmentId: string, type: IssueType, severity: IssueSeverity, note: string) => void;
@@ -30,7 +30,7 @@ export function IssuePanel({
   issues,
   segments,
   activeId,
-  onSeek,
+  onJumpPlay,
   onResolve,
   onDelete,
   onCreate,
@@ -149,7 +149,7 @@ export function IssuePanel({
                 </div>
                 {issue.note && <div className="issue-note">{issue.note}</div>}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button onClick={() => onSeek(issue.segmentId)}>⤓ 跳转播放</button>
+                  <button onClick={() => onJumpPlay(issue.segmentId)} title="选中该段并从其段首播放">⤓ 跳转播放</button>
                   {issue.status === "open" && (
                     <button onClick={() => onResolve(issue.issueId)}>✔ 已解决</button>
                   )}

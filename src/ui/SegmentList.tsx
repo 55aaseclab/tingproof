@@ -1,6 +1,9 @@
 /**
- * 字幕段列表。V0.1 使用 content-visibility 跳过屏外渲染（约 1.1k 段真实样本下流畅；
- * PRD 的完整虚拟滚动放到 V0.5，见 README 已知限制）。
+ * 字幕段列表（PRD V1.0.2 §3.3.5）。
+ * - 点击行内非操作区域 / 聚焦校对文本框 → onLocate（选中 + 精确定位 startMs，不自动播放）；
+ * - 行内主操作是播放/暂停开关：未播放显示“▶ 播放”，播放中显示“⏸ 暂停”，可访问名称同步；
+ * - 按钮事件不冒泡触发行定位；双击时间码等价于该行播放/暂停开关。
+ * 渲染优化：content-visibility 跳过屏外渲染（约 1.1k 段真实样本下流畅）。
  */
 import { memo, useCallback, useEffect, useRef } from "react";
 import { formatDisplay } from "../core/time.js";
@@ -14,15 +17,18 @@ interface Props {
   segments: SegmentRecord[];
   /** 选中段（用户当前工作段；行内确认不受播放位置影响）。 */
   selectedId: string | null;
+  /** 正在播放的段（= 选中段且处于播放状态）；用于行内按钮的动态文案。 */
+  playingSegmentId: string | null;
   unresolvedBySegment: Map<string, number>;
   loopSegmentId: string | null;
   onEdit: (segmentId: string, text: string, composing: boolean) => void;
   onCompositionEnd: (segmentId: string) => void;
   /** 行内确认：永远作用于被点击的 segmentId。 */
   onConfirmRow: (segmentId: string) => void;
-  /** 点进/聚焦某行编辑器时，该行成为选中段（Ctrl+Enter 语义正确的前提）。 */
-  onFocusRow: (segmentId: string) => void;
-  onSeek: (segmentId: string, andPlay?: boolean) => void;
+  /** 点击非操作区域 / 聚焦文本框：选中并定位 startMs，不自动播放。 */
+  onLocate: (segmentId: string) => void;
+  /** 行内播放/暂停开关（含双击时间码）。 */
+  onTogglePlay: (segmentId: string) => void;
   onLoop: (segmentId: string) => void;
   onCreateIssue: (segmentId: string) => void;
 }
@@ -30,13 +36,14 @@ interface Props {
 interface RowProps {
   seg: SegmentRecord;
   selected: boolean;
+  playing: boolean;
   looping: boolean;
   unresolvedCount: number;
   onEdit: Props["onEdit"];
   onCompositionEnd: Props["onCompositionEnd"];
   onConfirmRow: Props["onConfirmRow"];
-  onFocusRow: Props["onFocusRow"];
-  onSeek: Props["onSeek"];
+  onLocate: Props["onLocate"];
+  onTogglePlay: Props["onTogglePlay"];
   onLoop: Props["onLoop"];
   onCreateIssue: Props["onCreateIssue"];
 }
@@ -78,30 +85,38 @@ function AutoTextarea({
 const SegmentRow = memo(function SegmentRow({
   seg,
   selected,
+  playing,
   looping,
   unresolvedCount,
   onEdit,
   onCompositionEnd,
   onConfirmRow,
-  onFocusRow,
-  onSeek,
+  onLocate,
+  onTogglePlay,
   onLoop,
   onCreateIssue,
 }: RowProps) {
-  // 点击行内任意位置（非按钮/链接）也把该行设为选中段。
-  const selectOnPointer = (e: React.MouseEvent<HTMLDivElement>) => {
+  // 点击行内非操作区域（按钮/文本框之外）= 定位，不播放。
+  const locateOnPointer = (e: React.MouseEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
-    if (t.closest("button") || t.closest("textarea")) return;
-    onFocusRow(seg.segmentId);
+    // 操作区（按钮、文本框、时间码）不触发行定位：时间码是播放/暂停开关的一部分，
+    // 真实双击的前置 pointerdown 不能被当成行定位（审计项 2）。
+    if (t.closest("button") || t.closest("textarea") || t.closest(".cue-time")) return;
+    onLocate(seg.segmentId);
   };
+  const toggle = () => onTogglePlay(seg.segmentId);
   return (
     <div
       className={`seg-row ${selected ? "active" : ""}`}
       data-segment-id={seg.segmentId}
-      onPointerDown={selectOnPointer}
+      onPointerDown={locateOnPointer}
     >
       <div className="seg-meta">
-        <span className="cue-time" onDoubleClick={() => onSeek(seg.segmentId, true)} title="双击从该段开始播放">
+        <span
+          className="cue-time"
+          onDoubleClick={toggle}
+          title="双击 = 该段播放/暂停开关"
+        >
           {formatDisplay(seg.startMs)} → {formatDisplay(seg.endMs)}
         </span>
         <span className={`status-chip status-${seg.status}`}>
@@ -119,17 +134,25 @@ const SegmentRow = memo(function SegmentRow({
       <AutoTextarea
         value={seg.correctedText}
         ariaLabel={`校对文本 ${formatDisplay(seg.startMs)}`}
-        onFocus={() => onFocusRow(seg.segmentId)}
+        onFocus={() => onLocate(seg.segmentId)}
         onChange={(v, composing) => onEdit(seg.segmentId, v, composing)}
         onCompositionEnd={() => onCompositionEnd(seg.segmentId)}
       />
       <div className="seg-actions">
-        <button onClick={() => onSeek(seg.segmentId)} title="选中该段并定位到开始前 300ms（不自动播放）">
-          ▶ 定位
+        <button
+          onClick={toggle}
+          aria-label={playing ? "暂停" : "播放"}
+          title={
+            playing
+              ? "暂停：停在当前位置，不会回跳段首"
+              : "播放：选中该段并从段首开始（段尾自动暂停；循环模式除外）"
+          }
+        >
+          {playing ? "⏸ 暂停" : "▶ 播放"}
         </button>
         <button
           onClick={() => onConfirmRow(seg.segmentId)}
-          title="确认这一段（与播放位置无关）；Ctrl+Enter 确认当前选中段并跳到下一未校对段"
+          title="确认这一段（与播放位置无关）；Ctrl+Enter 确认当前选中段并定位下一未校对段段首"
         >
           ✓ 确认本段
         </button>
@@ -139,7 +162,7 @@ const SegmentRow = memo(function SegmentRow({
         >
           ⚑ 疑点
         </button>
-        <button onClick={() => onLoop(seg.segmentId)} title="循环播放该段时间范围（Ctrl+L）">
+        <button onClick={() => onLoop(seg.segmentId)} title="循环播放该段时间范围（Ctrl+L）；唯一的段尾回段首继续模式">
           ⭯ 循环
         </button>
       </div>
@@ -150,13 +173,14 @@ const SegmentRow = memo(function SegmentRow({
 export function SegmentList({
   segments,
   selectedId,
+  playingSegmentId,
   unresolvedBySegment,
   loopSegmentId,
   onEdit,
   onCompositionEnd,
   onConfirmRow,
-  onFocusRow,
-  onSeek,
+  onLocate,
+  onTogglePlay,
   onLoop,
   onCreateIssue,
 }: Props) {
@@ -167,13 +191,14 @@ export function SegmentList({
           key={seg.segmentId}
           seg={seg}
           selected={seg.segmentId === selectedId}
+          playing={seg.segmentId === playingSegmentId}
           looping={seg.segmentId === loopSegmentId}
           unresolvedCount={unresolvedBySegment.get(seg.segmentId) ?? 0}
           onEdit={onEdit}
           onCompositionEnd={onCompositionEnd}
           onConfirmRow={onConfirmRow}
-          onFocusRow={onFocusRow}
-          onSeek={onSeek}
+          onLocate={onLocate}
+          onTogglePlay={onTogglePlay}
           onLoop={onLoop}
           onCreateIssue={onCreateIssue}
         />
