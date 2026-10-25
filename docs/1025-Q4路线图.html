@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="听校 TingProof 2026 Q4 软件交付与语料生产路线图">
+  <title>听校（TingProof）2026 Q4 路线图</title>
+  <style>
+    :root {
+      --blue: #1a73e8;
+      --blue-soft: #e8f0fe;
+      --green: #34a853;
+      --green-soft: #e6f4ea;
+      --yellow: #fbbc04;
+      --yellow-soft: #fef7e0;
+      --red: #ea4335;
+      --red-soft: #fce8e6;
+      --purple: #9334e6;
+      --purple-soft: #f3e8fd;
+      --ink: #202124;
+      --muted: #5f6368;
+      --line: #e8eaed;
+      --surface: #ffffff;
+      --background: #f8f9fa;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(60, 64, 67, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--background);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.62;
+    }
+
+    button, input { font: inherit; }
+    a { color: var(--blue); }
+    .roadmap { max-width: 1240px; margin: 0 auto; padding: 36px 42px 96px; }
+
+    .roadmap-header {
+      padding: 28px 30px;
+      color: #fff;
+      background: linear-gradient(135deg, #174ea6, #1a73e8 58%, #669df6);
+      border-radius: 14px;
+      box-shadow: 0 8px 28px rgba(26, 115, 232, 0.22);
+    }
+    .eyebrow {
+      margin: 0 0 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      opacity: 0.84;
+    }
+    .roadmap-header h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.24; }
+    .roadmap-header p { max-width: 850px; margin: 0; opacity: 0.92; }
+    .roadmap-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 22px;
+      margin-top: 18px;
+      font-size: 13px;
+    }
+    .roadmap-meta span {
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.13);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 999px;
+    }
+
+    .assumption {
+      margin: 18px 0 0;
+      padding: 14px 18px;
+      background: var(--yellow-soft);
+      border: 1px solid #f9df91;
+      border-left: 5px solid var(--yellow);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .assumption strong { color: #8a5200; }
+
+    .kpi-bar {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .kpi-card {
+      min-height: 96px;
+      padding: 16px 12px;
+      text-align: center;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .kpi-card .value { color: var(--blue); font-size: 25px; font-weight: 760; }
+    .kpi-card .label { margin-top: 4px; color: var(--muted); font-size: 12px; }
+
+    .section-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      margin: 0 0 20px;
+      padding: 10px 8px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+    }
+    .section-nav a {
+      padding: 5px 10px;
+      color: var(--muted);
+      border-radius: 5px;
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .section-nav a:hover, .section-nav a:focus {
+      color: var(--blue);
+      background: var(--blue-soft);
+      outline: none;
+    }
+
+    .card {
+      margin: 0 0 22px;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .card h2 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 16px;
+      padding-bottom: 9px;
+      font-size: 19px;
+      border-bottom: 1px solid #f0f1f2;
+    }
+    .card h3 { margin: 20px 0 10px; font-size: 15px; }
+    .card p { margin: 8px 0; }
+    .subtle { color: var(--muted); font-size: 13px; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .mini-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fcfcfd;
+    }
+    .mini-card h3 { margin: 0 0 8px; }
+    .mini-card ul { margin: 8px 0 0; padding-left: 20px; }
+
+    .data-wrap { overflow-x: auto; }
+    .data-table {
+      width: 100%;
+      margin: 10px 0;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .data-table th {
+      padding: 10px 12px;
+      color: var(--muted);
+      background: #f8f9fa;
+      border-bottom: 2px solid var(--line);
+      font-weight: 650;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .data-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f0f1f2;
+      vertical-align: top;
+    }
+    .data-table tbody tr:nth-child(even) td { background: #fcfcfd; }
+    .data-table tbody tr:hover td { background: #f4f8fe; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .tag-p0, .tag-high { color: #b3261e; background: var(--red-soft); }
+    .tag-p1, .tag-blue { color: #1558b0; background: var(--blue-soft); }
+    .tag-p2, .tag-gray { color: var(--muted); background: #f1f3f4; }
+    .tag-medium, .tag-active { color: #8a5200; background: var(--yellow-soft); }
+    .tag-low, .tag-done { color: #0d652d; background: var(--green-soft); }
+    .tag-purple { color: #681da8; background: var(--purple-soft); }
+
+    .decision-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .decision {
+      flex: 1 1 220px;
+      padding: 11px 12px;
+      background: #fff8e1;
+      border: 1px solid #f4d67b;
+      border-radius: 7px;
+      font-size: 12px;
+    }
+    .decision b { display: block; margin-bottom: 3px; color: #7a4c00; }
+
+    .gantt { overflow-x: auto; padding-bottom: 8px; }
+    .gantt-inner { min-width: 920px; }
+    .gantt-header, .gantt-row { display: flex; }
+    .gantt-header {
+      margin-bottom: 4px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--line);
+    }
+    .gantt-label-col, .gantt-label {
+      width: 235px;
+      flex: 0 0 235px;
+      padding-right: 12px;
+    }
+    .gantt-label-col { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .gantt-label {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      font-size: 12px;
+    }
+    .gantt-label strong { font-size: 12px; }
+    .gantt-label small { color: var(--muted); }
+    .gantt-timeline {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      flex: 1;
+    }
+    .gantt-week {
+      padding: 0 3px;
+      color: var(--muted);
+      border-left: 1px solid #f0f1f2;
+      font-size: 11px;
+      text-align: center;
+    }
+    .gantt-week b { display: block; color: var(--ink); }
+    .gantt-row {
+      align-items: center;
+      min-height: 44px;
+      border-bottom: 1px solid #f3f4f5;
+    }
+    .gantt-area {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      flex: 1;
+      height: 34px;
+    }
+    .gantt-grid {
+      height: 34px;
+      border-left: 1px solid #f0f1f2;
+    }
+    .gantt-bar {
+      position: absolute;
+      top: 5px;
+      height: 24px;
+      padding: 3px 8px;
+      color: #fff;
+      border-radius: 5px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+      cursor: help;
+      font-size: 10px;
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .team-product { background: var(--purple); }
+    .team-desktop { background: var(--blue); }
+    .team-audio { background: var(--green); }
+    .team-cross { color: #3c2f00; background: var(--yellow); }
+    .team-qa { background: var(--red); }
+    .gantt-milestone {
+      position: absolute;
+      top: 9px;
+      width: 14px;
+      height: 14px;
+      background: #202124;
+      transform: translateX(-50%) rotate(45deg);
+      z-index: 3;
+      cursor: help;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 14px; height: 10px; border-radius: 2px; }
+
+    details.epic, details.milestone {
+      margin: 9px 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    details summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 15px;
+      cursor: pointer;
+      list-style: none;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before {
+      content: "›";
+      color: var(--blue);
+      font-size: 20px;
+      line-height: 1;
+      transition: transform 0.2s;
+    }
+    details[open] summary::before { transform: rotate(90deg); }
+    details[open] summary { background: #f8faff; border-bottom: 1px solid var(--line); }
+    .detail-body { padding: 14px 18px 16px; font-size: 13px; }
+    .detail-body ul { margin: 8px 0; padding-left: 20px; }
+    .summary-spacer { flex: 1; }
+
+    .critical-path {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      margin: 14px 0;
+    }
+    .path-node {
+      padding: 7px 10px;
+      color: #b3261e;
+      background: var(--red-soft);
+      border: 1px solid #f1aaa4;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .path-arrow { color: #9aa0a6; font-weight: 700; }
+
+    .swimlane-row {
+      display: flex;
+      border-bottom: 1px solid #f0f1f2;
+    }
+    .swimlane-label {
+      width: 140px;
+      flex: 0 0 140px;
+      padding: 11px 12px 11px 0;
+      color: var(--muted);
+      border-right: 2px solid var(--line);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: right;
+    }
+    .swimlane-content {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+    }
+    .lane-node {
+      padding: 5px 9px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .capacity-gauge {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 14px 0;
+    }
+    .gauge-label { width: 92px; font-size: 13px; }
+    .gauge-track {
+      position: relative;
+      flex: 1;
+      height: 32px;
+      overflow: hidden;
+      background: #f1f3f4;
+      border-radius: 999px;
+    }
+    .gauge-fill {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      background: var(--green);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .buffer-bar {
+      display: flex;
+      min-width: 600px;
+      height: 42px;
+      margin: 14px 0;
+      overflow: hidden;
+      border-radius: 7px;
+    }
+    .buffer-segment {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 650;
+      text-align: center;
+    }
+
+    .risk-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin: 10px 0;
+    }
+    .risk-filter {
+      padding: 6px 11px;
+      color: var(--muted);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .risk-filter.active, .risk-filter:hover {
+      color: var(--blue);
+      background: var(--blue-soft);
+      border-color: #aecbfa;
+    }
+    .risk-row[hidden] { display: none; }
+
+    .callout {
+      padding: 13px 15px;
+      border-radius: 7px;
+      font-size: 13px;
+    }
+    .callout-blue { color: #174ea6; background: var(--blue-soft); border-left: 4px solid var(--blue); }
+    .callout-red { color: #8c1d18; background: var(--red-soft); border-left: 4px solid var(--red); }
+    .callout-green { color: #0d652d; background: var(--green-soft); border-left: 4px solid var(--green); }
+
+    .checklist { margin: 8px 0; padding: 0; list-style: none; }
+    .checklist li { display: flex; gap: 8px; padding: 5px 0; font-size: 13px; }
+    .checklist li::before { content: "□"; color: var(--blue); font-weight: 700; }
+
+    .doc-fab {
+      position: fixed;
+      right: 30px;
+      bottom: 30px;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 52px;
+      height: 52px;
+      color: #fff;
+      background: var(--blue);
+      border: 0;
+      border-radius: 50%;
+      box-shadow: 0 5px 16px rgba(26, 115, 232, 0.38);
+      cursor: pointer;
+      transition: transform 0.2s, background 0.2s;
+    }
+    .doc-fab:hover { background: #4a90e2; transform: scale(1.08); }
+    .doc-fab svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 2; }
+    .doc-fab-label {
+      position: absolute;
+      right: 61px;
+      padding: 5px 10px;
+      color: #fff;
+      background: #303134;
+      border-radius: 4px;
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+      transition: opacity 0.2s;
+    }
+    .doc-fab:hover .doc-fab-label { opacity: 1; }
+    .doc-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1001;
+      background: rgba(32, 33, 36, 0.38);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    .doc-overlay.open { opacity: 1; pointer-events: auto; }
+    .doc-panel {
+      position: fixed;
+      top: 0;
+      right: -620px;
+      z-index: 1002;
+      display: flex;
+      flex-direction: column;
+      width: min(620px, 94vw);
+      height: 100vh;
+      background: #fff;
+      box-shadow: -5px 0 20px rgba(0, 0, 0, 0.14);
+      transition: right 0.28s ease;
+    }
+    .doc-panel.open { right: 0; }
+    .doc-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .doc-panel-header h3 { margin: 0; font-size: 16px; }
+    .doc-actions { display: flex; gap: 7px; }
+    .panel-btn {
+      padding: 6px 10px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .panel-btn:hover { color: var(--blue); border-color: var(--blue); }
+    .panel-btn.copied { color: #fff; background: var(--green); border-color: var(--green); }
+    .doc-body { flex: 1; overflow: auto; padding: 20px; }
+    .doc-body pre {
+      margin: 0;
+      color: #303134;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.72;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    @media (max-width: 980px) {
+      .roadmap { padding: 22px 18px 80px; }
+      .kpi-bar { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .roadmap { padding: 12px 10px 76px; }
+      .roadmap-header { padding: 22px 18px; border-radius: 10px; }
+      .roadmap-header h1 { font-size: 25px; }
+      .kpi-bar { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      .grid-2 { grid-template-columns: 1fr; }
+      .section-nav { position: static; }
+      .card { padding: 17px 14px; }
+      .swimlane-label { width: 92px; flex-basis: 92px; }
+      .doc-fab { right: 18px; bottom: 18px; }
+    }
+    @media print {
+      body { background: #fff; }
+      .roadmap { max-width: none; padding: 12px; }
+      .section-nav, .doc-fab, .doc-overlay, .doc-panel, .risk-controls { display: none !important; }
+      .roadmap-header { color: #202124; background: #fff; border: 2px solid #1a73e8; box-shadow: none; }
+      .roadmap-meta span { border-color: #dadce0; }
+      .card, .kpi-card { box-shadow: none; break-inside: avoid; }
+      details { break-inside: avoid; }
+      details > .detail-body { display: block !important; }
+      .gantt-inner { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="roadmap">
+    <header class="roadmap-header">
+      <p class="eyebrow">2026 Q4 · Software Delivery + Editorial Production</p>
+      <h1>听校（TingProof）交付路线图</h1>
+      <p>先用真实长音频验证“听、改、存疑、复核、成稿、验收、导出”的最短闭环，再扩展到 21 份、66 小时语料。软件交付与人工校稿分轨管理，避免把开发完成误写成完美文稿已经完成。</p>
+      <div class="roadmap-meta">
+        <span>版本：v1.0</span>
+        <span>制定：2026-10-25</span>
+        <span>周期：2026-10-26 — 2026-12-20</span>
+        <span>负责人：产品/研发负责人（待指定）</span>
+        <span>状态：🔵 开发未开始</span>
+      </div>
+    </header>
+
+    <div class="assumption">
+      <strong>排期基线假设：</strong>
+      1 名桌面工程师 + 1 名音频/数据工程师 + 0.5 名产品/设计 + 0.5 名测试，共 3 个有效 FTE；4 个双周迭代；有效产能 67.2 人天；计划工作 53 人天；预留 14.2 人天（21.1%）。如果实际为单人开发，同等范围应重排为约 18–24 周，不能沿用本页日期。
+    </div>
+
+    <section class="kpi-bar" aria-label="路线图关键数字">
+      <div class="kpi-card"><div class="value">8</div><div class="label">Epic</div></div>
+      <div class="kpi-card"><div class="value">8 周</div><div class="label">软件 V1.0 基线周期</div></div>
+      <div class="kpi-card"><div class="value">67.2</div><div class="label">有效产能（人天）</div></div>
+      <div class="kpi-card"><div class="value">78.9%</div><div class="label">计划产能占用</div></div>
+      <div class="kpi-card"><div class="value">21.1%</div><div class="label">风险与发布缓冲</div></div>
+      <div class="kpi-card"><div class="value">5</div><div class="label">高风险项</div></div>
+    </section>
+
+    <nav class="section-nav" aria-label="路线图导航">
+      <a href="#overview">目标</a>
+      <a href="#gantt">时间线</a>
+      <a href="#epics">Epic</a>
+      <a href="#milestones">里程碑</a>
+      <a href="#dependencies">依赖</a>
+      <a href="#capacity">产能</a>
+      <a href="#content-track">语料生产</a>
+      <a href="#risks">风险</a>
+      <a href="#metrics">指标</a>
+      <a href="#governance">治理</a>
+      <a href="#changelog">变更</a>
+    </nav>
+
+    <section class="card" id="overview">
+      <h2>1. 季度目标与范围边界</h2>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>#</th><th>目标（O）</th><th>关键结果（KR）</th><th>优先级</th><th>验收时点</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td rowspan="3">O1</td>
+              <td rowspan="3"><b>证明人工校对主链路可用</b><br><span class="subtle">用真实 3 小时以上音频完成 V0.1 纵向样机</span></td>
+              <td>KR1：连续校对 60 分钟样本，无崩溃、无不可恢复数据丢失</td>
+              <td><span class="tag tag-p0">P0</span></td>
+              <td>W2 · 11/08</td>
+            </tr>
+            <tr><td>KR2：SRT 导出往返时间误差 0 ms，源文件哈希不变</td><td><span class="tag tag-p0">P0</span></td><td>W2 · 11/08</td></tr>
+            <tr><td>KR3：音文同步误差 ≤ 100 ms，崩溃恢复 RPO ≤ 5 秒</td><td><span class="tag tag-p0">P0</span></td><td>W2 · 11/08</td></tr>
+            <tr>
+              <td rowspan="3">O2</td>
+              <td rowspan="3"><b>把样机扩成可生产工具</b><br><span class="subtle">批量项目、增强、疑点、三层文稿与覆盖检查</span></td>
+              <td>KR1：真实目录 21 MP3 + 21 SRT 唯一候选配对正确率 100%</td>
+              <td><span class="tag tag-p0">P0</span></td>
+              <td>W5 · 11/29</td>
+            </tr>
+            <tr><td>KR2：清晰/一般/困难三类样本完成端到端试产，关键 P0 缺陷为 0</td><td><span class="tag tag-p0">P0</span></td><td>W5 · 11/29</td></tr>
+            <tr><td>KR3：效率基线建立，并验证相对旧流程的方向性改善</td><td><span class="tag tag-p1">P1</span></td><td>W5 · 11/29</td></tr>
+            <tr>
+              <td rowspan="3">O3</td>
+              <td rowspan="3"><b>发布可承载 66 小时项目的 V1.0</b><br><span class="subtle">可靠、可验收、可导出，而非只会播放和改字</span></td>
+              <td>KR1：AC-001 至 AC-040 全部通过；阻塞级数据、安全、导出缺陷为 0</td>
+              <td><span class="tag tag-p0">P0</span></td>
+              <td>W7 · 12/13</td>
+            </tr>
+            <tr><td>KR2：连续 4 小时稳定性测试通过；升级与回滚演练成功</td><td><span class="tag tag-p0">P0</span></td><td>W7 · 12/13</td></tr>
+            <tr><td>KR3：21 份源文件可导入、检查、签署和重新导入验收包，源文件不变</td><td><span class="tag tag-p0">P0</span></td><td>W8 · 12/20</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>启动前决策门</h3>
+      <div class="decision-strip">
+        <div class="decision"><b>D1 · 10/27</b>确认本地桌面、Linux 首发，不做三平台同步首发。</div>
+        <div class="decision"><b>D2 · 10/27</b>确认逐字校对稿 + 成稿三层模型仍为 V1.0 范围。</div>
+        <div class="decision"><b>D3 · 10/27</b>确认“接受不可辨”的占位、签署和完成策略。</div>
+        <div class="decision"><b>D4 · 11/01</b>冻结音频栈、桌面壳、数据库和 FFmpeg 分发方式。</div>
+        <div class="decision"><b>D5 · 11/01</b>确认 V0.5 试产按“3 个完整文件”还是“3 × 60 分钟样本”验收。</div>
+        <div class="decision"><b>D6 · 11/08</b>用样机实测锁定 seek、内存、VAD 和增强性能线。</div>
+      </div>
+
+      <div class="grid-2">
+        <div class="mini-card">
+          <h3>Must have · 本季度必须交付</h3>
+          <ul>
+            <li>本地项目、源文件只读、MP3/SRT 导入与自动配对。</li>
+            <li>长音频播放、波形、变速、循环、自动回退和增强 A/B。</li>
+            <li>原始识别、逐字校对、成稿三层及毫秒级来源映射。</li>
+            <li>疑点、术语、VAD 覆盖候选、质量闸门与签署。</li>
+            <li>自动保存、崩溃恢复、快照、SRT/Markdown/JSON 导出。</li>
+          </ul>
+        </div>
+        <div class="mini-card">
+          <h3>Won’t have · 明确不进入 V1.0</h3>
+          <ul>
+            <li>账号、服务器、实时多人协作。</li>
+            <li>手机端编辑和在线录音。</li>
+            <li>自动发布到正式书稿目录。</li>
+            <li>云端 ASR 默认调用、频谱高级编辑和脚踏板。</li>
+            <li>macOS/Windows 正式发行包，除非额外增加产能或顺延。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="gantt">
+      <h2>2. 八周交付时间线</h2>
+      <p class="subtle">颜色表示主责能力，条形仅表达计划窗口；所有 Epic 默认状态为“🔵 未开始”。把鼠标停在条形上可查看负责人、工期、工作量和退出条件。</p>
+      <div class="gantt">
+        <div class="gantt-inner">
+          <div class="gantt-header">
+            <div class="gantt-label-col">Epic / 主责 / 工作量</div>
+            <div class="gantt-timeline" id="ganttHeader"></div>
+          </div>
+          <div id="ganttBody"></div>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i class="team-product"></i>产品/设计</span>
+        <span><i class="team-desktop"></i>桌面工程</span>
+        <span><i class="team-audio"></i>音频/数据</span>
+        <span><i class="team-cross"></i>跨职能</span>
+        <span><i class="team-qa"></i>测试/发布</span>
+        <span><i style="background:#202124;transform:rotate(45deg);"></i>里程碑</span>
+      </div>
+
+      <h3>周节奏</h3>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>周</th><th>日期</th><th>本周唯一主目标</th><th>可观察产出</th><th>不得挤占的缓冲</th></tr></thead>
+          <tbody>
+            <tr><td>W1</td><td>10/26–11/01</td><td>消灭架构未知数</td><td>关键决策、5 小时音频基准、项目骨架、数据模型</td><td>2 天技术失败预案</td></tr>
+            <tr><td>W2</td><td>11/02–11/08</td><td>交付 V0.1 纵向样机</td><td>单文件完整听校闭环、60 分钟连续试用</td><td>1 天修复阻塞缺陷</td></tr>
+            <tr><td>W3</td><td>11/09–11/15</td><td>从单文件扩到批量项目</td><td>21 对文件配对、列表、搜索、进度</td><td>不提前做 V1.1</td></tr>
+            <tr><td>W4</td><td>11/16–11/22</td><td>证据辅助与成稿映射</td><td>增强、VAD、术语、三层文稿、来源回放</td><td>1 天性能回归</td></tr>
+            <tr><td>W5</td><td>11/23–11/29</td><td>V0.5 真实试产</td><td>三类样本、效率基线、关键 P0 清零</td><td>2 天用户反馈修复</td></tr>
+            <tr><td>W6</td><td>11/30–12/06</td><td>质量闸门与全格式导出</td><td>规则引擎、签署、SRT/MD/JSON、manifest</td><td>不加新模块</td></tr>
+            <tr><td>W7</td><td>12/07–12/13</td><td>形成 Release Candidate</td><td>40 条 AC、4 小时稳定性、升级回滚</td><td>只收 P0 修复</td></tr>
+            <tr><td>W8</td><td>12/14–12/20</td><td>缓冲、发布和交接</td><td>Linux 安装包、文档、恢复演练、V1.0</td><td>整周发布缓冲的一部分</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="epics">
+      <h2>3. Epic 拆解</h2>
+      <p class="subtle">每个 Epic 控制在 1–3 周内，完成后能独立验证价值或风险。点击展开交付物、依赖和完成定义。</p>
+
+      <details class="epic" open>
+        <summary><span class="tag tag-purple">E0</span> 决策、架构与性能探针 <span class="summary-spacer"></span><span class="tag tag-p0">W1 · 4 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>产品负责人 + 桌面/音频技术负责人。<br>
+          <b>交付：</b>
+          <ul>
+            <li>关闭 D1–D5：平台、三层范围、不可辨政策、技术栈和试产口径。</li>
+            <li>验证一份 5 小时以上 MP3 的打开、seek、内存和波形分块策略。</li>
+            <li>验证 SRT 解析/回写、整数毫秒模型、SQLite 事务与源文件只读。</li>
+            <li>建立 CI、样本数据、性能脚本和架构决策记录。</li>
+          </ul>
+          <b>完成定义：</b>关键技术没有未验证的“应该可以”；若指标不达标，已选择可执行 Plan B。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-blue">E1</span> 本地项目与数据安全底座 <span class="summary-spacer"></span><span class="tag tag-p0">W1–W2 · 5 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>桌面工程；测试从第一周介入。<br>
+          <b>交付：</b>
+          <ul>
+            <li>项目创建/打开、单文件导入、源路径/哈希/媒体元数据。</li>
+            <li>原始识别层不可变、逐字层初始化、稳定 UUID 和审计事件。</li>
+            <li>500 ms 防抖保存、最长 5 秒强制提交、会话位置恢复。</li>
+            <li>源文件丢失后的重新定位和内容变化保护。</li>
+          </ul>
+          <b>依赖：</b>E0 数据模型。<br>
+          <b>完成定义：</b>强制终止后可恢复；应用从不写回源 MP3/SRT。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-blue">E2</span> 长音频听校纵向闭环 <span class="summary-spacer"></span><span class="tag tag-p0">W1–W2 · 10 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>桌面工程 + 音频工程。<br>
+          <b>交付：</b>
+          <ul>
+            <li>长音频播放、seek 索引、多尺度波形、播放跟随与精确时间码。</li>
+            <li>F7/F8/F9、自动回退、0.5×–2.0× 变速不变调、A-B 循环和增益。</li>
+            <li>逐字稿改字、状态、确认并前进、原始差异和基础疑点。</li>
+            <li>SRT 原子导出与回读自校验。</li>
+          </ul>
+          <b>依赖：</b>E0 音频栈；E1 最小项目存储。<br>
+          <b>完成定义：</b>真实样本连续工作 60 分钟，达到 M2 指标。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-blue">E3</span> 批量项目与生产力工具 <span class="summary-spacer"></span><span class="tag tag-p0">W3–W4 · 5 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>桌面工程 + 产品。<br>
+          <b>交付：</b>
+          <ul>
+            <li>目录扫描、连续空格规范化、一对多冲突确认、21 对真实文件导入。</li>
+            <li>虚拟化字幕列表、文件/时长/片段/疑点进度和“继续工作”。</li>
+            <li>拆分、合并、调时、说话人、跨层全文搜索和术语表。</li>
+            <li>工作队列：下一未校对、阻塞疑点、时间轴异常。</li>
+          </ul>
+          <b>依赖：</b>E1、E2。<br>
+          <b>完成定义：</b>24,671 个 cue 可流畅浏览、搜索和定位，不一次性渲染。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-low">E4</span> 音频证据辅助与覆盖检测 <span class="summary-spacer"></span><span class="tag tag-p0">W2–W4 · 6 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>音频/数据工程。<br>
+          <b>交付：</b>
+          <ul>
+            <li>原音/语音清晰/强降噪预设 A/B，缓存可删除重建。</li>
+            <li>本地 VAD 候选、有声无字/有字无声/末尾未检查分类。</li>
+            <li>后台任务、失败降级、进度、暂停与资源限速。</li>
+            <li>检测当前已知 00:07:08.606 文件级尾差，但不把尾差自动视作讲话。</li>
+          </ul>
+          <b>依赖：</b>E0 音频基准；E2 播放引擎。<br>
+          <b>完成定义：</b>增强失败不影响原音校对；VAD 只产生候选，必须人工裁决。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-purple">E5</span> 三层文稿与来源追溯 <span class="summary-spacer"></span><span class="tag tag-p0">W3–W5 · 6 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>产品/设计 + 桌面工程。<br>
+          <b>交付：</b>
+          <ul>
+            <li>原始识别、逐字校对、成稿三层分离。</li>
+            <li>从已确认片段创建成稿、章节组织、多个来源范围、一键回放。</li>
+            <li>来源片段变化时成稿自动退回复核。</li>
+            <li>“环境画卷”标题/章节/来源/正文 Markdown 模板。</li>
+          </ul>
+          <b>依赖：</b>E1 稳定 ID；E2 片段状态；D2 三层范围确认。<br>
+          <b>完成定义：</b>任何普通成稿段落均有可回放来源；编辑注显式区分。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-active">E6</span> 质量闸门、签署与导出 <span class="summary-spacer"></span><span class="tag tag-p0">W5–W7 · 8 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>跨职能。<br>
+          <b>交付：</b>
+          <ul>
+            <li>源、时间轴、覆盖、状态、疑点、水印、来源和导出规则。</li>
+            <li>接受不可辨的尝试记录、签署、报告披露和重新开启。</li>
+            <li>质量总览、定位修复、完成签署及修改后自动失效。</li>
+            <li>SRT/TXT/Markdown/JSON/CSV 报告、manifest 和原子导出。</li>
+          </ul>
+          <b>依赖：</b>E3 状态、E4 VAD、E5 来源映射。<br>
+          <b>完成定义：</b>阻塞项为 0 才能最终签署；导出可回读，旧文件不会被半写入覆盖。
+        </div>
+      </details>
+
+      <details class="epic">
+        <summary><span class="tag tag-high">E7</span> 可靠性、性能与发布 <span class="summary-spacer"></span><span class="tag tag-p0">W6–W8 · 9 人天</span></summary>
+        <div class="detail-body">
+          <b>负责人：</b>桌面工程 + 测试；音频工程支援。<br>
+          <b>交付：</b>
+          <ul>
+            <li>统一撤销、自动/手动快照、紧急恢复包、数据库迁移与回滚。</li>
+            <li>500,000 段性能数据、5 小时音频、后台任务争用和低磁盘故障注入。</li>
+            <li>AC-001 至 AC-040、连续 4 小时稳定性、隐私和源哈希测试。</li>
+            <li>Linux 安装包、用户手册、故障恢复手册、已知限制和发布清单。</li>
+          </ul>
+          <b>依赖：</b>E1–E6；W7 后禁止非 P0 范围进入。<br>
+          <b>完成定义：</b>达到 M4/M5 全部发布门槛，且仍保有未透支缓冲。
+        </div>
+      </details>
+    </section>
+
+    <section class="card" id="milestones">
+      <h2>4. 里程碑与门禁</h2>
+      <details class="milestone" open>
+        <summary><span class="tag tag-done">🟢 M0</span> 需求基线完成 <span class="summary-spacer"></span>2026-10-25</summary>
+        <div class="detail-body">
+          <b>交付物：</b>PRD V1.0.0、待确认清单、路线图。<br>
+          <b>成功指标：</b>真实素材规模、已知尾差、三层模型和 40 条验收标准已经进入基线。<br>
+          <b>剩余门禁：</b>D1–D5 尚未由项目决策人签字。
+        </div>
+      </details>
+      <details class="milestone">
+        <summary><span class="tag tag-p1">🔵 M1</span> 技术可行性门 <span class="summary-spacer"></span>W1 · 2026-11-01</summary>
+        <div class="detail-body">
+          <b>必须交付：</b>5 小时音频性能报告、技术栈 ADR、数据模型、SRT 往返探针、源只读验证、Plan B。<br>
+          <b>北极星：</b>最大技术风险均有实测证据。<br>
+          <b>护栏：</b>不得以“后面再优化”放过打不开、seek 失控、内存超限或写源文件的问题。<br>
+          <b>Go/No-Go：</b>若长音频方案不达标，立即改用分块代理/预计算波形，不进入大规模 UI 开发。
+        </div>
+      </details>
+      <details class="milestone">
+        <summary><span class="tag tag-p1">🔵 M2</span> V0.1 纵向样机 <span class="summary-spacer"></span>W2 · 2026-11-08</summary>
+        <div class="detail-body">
+          <b>必须交付：</b>单文件导入、长音频播放、波形、快捷键、逐字编辑、基础疑点、自动保存、SRT 导出。<br>
+          <b>北极星：</b>≥ 60 分钟真实音频被人工确认且可回溯。<br>
+          <b>过程指标：</b>完成旧流程基线与样机流程计时。<br>
+          <b>护栏：</b>0 次不可恢复丢稿；RPO ≤ 5 秒；音文同步 ≤ 100 ms；SRT 往返 0 ms；源哈希不变。
+        </div>
+      </details>
+      <details class="milestone">
+        <summary><span class="tag tag-p1">🔵 M3</span> V0.5 生产试用 <span class="summary-spacer"></span>W5 · 2026-11-29</summary>
+        <div class="detail-body">
+          <b>必须交付：</b>批量配对、项目进度、增强、VAD、术语、复核队列、三层文稿、来源映射和早期质量报告。<br>
+          <b>北极星：</b>三类难度样本均完成端到端校对与成稿。<br>
+          <b>过程指标：</b>21/21 唯一候选配对正确；关键 P0 缺陷为 0；测得人工小时/音频小时。<br>
+          <b>护栏：</b>不因追求速度降低内容抽检准确性。<br>
+          <b>范围提示：</b>“三份完整文件”需要额外编辑工时；D5 若未确认，软件验收按每类连续 60 分钟，完整文件进入语料生产轨。
+        </div>
+      </details>
+      <details class="milestone">
+        <summary><span class="tag tag-p1">🔵 M4</span> V1.0 Release Candidate <span class="summary-spacer"></span>W7 · 2026-12-13</summary>
+        <div class="detail-body">
+          <b>必须交付：</b>质量闸门、签署、快照、崩溃恢复、全格式导出、升级回滚和发布候选包。<br>
+          <b>北极星：</b>AC-001 至 AC-040 全部通过。<br>
+          <b>过程指标：</b>连续 4 小时稳定性通过；21 份文件可全量导入和运行覆盖检查。<br>
+          <b>护栏：</b>数据丢失、安全、源文件修改和导出损坏缺陷为 0。<br>
+          <b>冻结：</b>从本里程碑起仅接收阻塞级修复。
+        </div>
+      </details>
+      <details class="milestone">
+        <summary><span class="tag tag-p1">🔵 M5</span> V1.0 发布与交接 <span class="summary-spacer"></span>W8 · 2026-12-20</summary>
+        <div class="detail-body">
+          <b>必须交付：</b>Linux 安装包、签名/校验和、用户手册、恢复演练记录、发布说明、已知限制。<br>
+          <b>北极星：</b>当前 66 小时项目能够完整导入、持续校对、质量签署并生成可重新导入的验收包。<br>
+          <b>护栏：</b>这里承诺的是软件能力，不承诺 66 小时内容已全部人工校完。完稿日期由语料生产轨单独计算。
+        </div>
+      </details>
+    </section>
+
+    <section class="card" id="dependencies">
+      <h2>5. 依赖关系与关键路径</h2>
+      <h3>关键路径</h3>
+      <div class="critical-path" aria-label="关键路径">
+        <span class="path-node">D1–D5 决策</span><span class="path-arrow">→</span>
+        <span class="path-node">E0 技术探针</span><span class="path-arrow">→</span>
+        <span class="path-node">E1 + E2 纵向闭环</span><span class="path-arrow">→</span>
+        <span class="path-node">E3/E4/E5 生产化</span><span class="path-arrow">→</span>
+        <span class="path-node">E6 质量与导出</span><span class="path-arrow">→</span>
+        <span class="path-node">E7 发布</span>
+      </div>
+      <div class="callout callout-red">
+        关键路径上没有“云 ASR、多人协作、三平台首发”。任何新范围进入，都必须等量移出一个当前 P0/P1，或明确顺延 M5；不能无成本插入。
+      </div>
+
+      <h3>角色泳道</h3>
+      <div class="swimlane">
+        <div class="swimlane-row">
+          <div class="swimlane-label">产品/设计</div>
+          <div class="swimlane-content">
+            <span class="lane-node tag-purple">D1–D5</span><span>→</span>
+            <span class="lane-node tag-purple">工作台原型</span><span>→</span>
+            <span class="lane-node tag-purple">三层成稿</span><span>→</span>
+            <span class="lane-node tag-purple">试产与签署</span>
+          </div>
+        </div>
+        <div class="swimlane-row">
+          <div class="swimlane-label">桌面工程</div>
+          <div class="swimlane-content">
+            <span class="lane-node tag-blue">E1 项目底座</span><span>→</span>
+            <span class="lane-node tag-blue">E2 校对闭环</span><span>→</span>
+            <span class="lane-node tag-blue">E3/E5</span><span>→</span>
+            <span class="lane-node tag-blue">E6/E7</span>
+          </div>
+        </div>
+        <div class="swimlane-row">
+          <div class="swimlane-label">音频/数据</div>
+          <div class="swimlane-content">
+            <span class="lane-node tag-low">音频探针</span><span>→</span>
+            <span class="lane-node tag-low">播放/波形</span><span>→</span>
+            <span class="lane-node tag-low">增强/VAD</span><span>→</span>
+            <span class="lane-node tag-low">性能与降级</span>
+          </div>
+        </div>
+        <div class="swimlane-row">
+          <div class="swimlane-label">测试</div>
+          <div class="swimlane-content">
+            <span class="lane-node tag-high">故障注入框架</span><span>→</span>
+            <span class="lane-node tag-high">真实样本回归</span><span>→</span>
+            <span class="lane-node tag-high">40 AC</span><span>→</span>
+            <span class="lane-node tag-high">稳定性/发布</span>
+          </div>
+        </div>
+        <div class="swimlane-row">
+          <div class="swimlane-label">内容负责人</div>
+          <div class="swimlane-content">
+            <span class="lane-node tag-medium">旧流程基线</span><span>→</span>
+            <span class="lane-node tag-medium">60 分钟样本</span><span>→</span>
+            <span class="lane-node tag-medium">三类试产</span><span>→</span>
+            <span class="lane-node tag-medium">全量校稿</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>依赖清单</h3>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>依赖</th><th>类型</th><th>最晚可用</th><th>影响</th><th>降级方案</th><th>Owner</th></tr></thead>
+          <tbody>
+            <tr><td>D1–D3 产品决策</td><td><span class="tag tag-high">硬依赖</span></td><td>10/27</td><td>数据模型和完成状态机</td><td>按 PRD 默认建议实现，后改进入变更评审</td><td>产品负责人</td></tr>
+            <tr><td>桌面壳/音频栈/FFmpeg 分发选择</td><td><span class="tag tag-high">硬依赖</span></td><td>11/01</td><td>播放、打包、许可和跨平台</td><td>试用版要求系统 FFmpeg；V1 前改为合规打包</td><td>技术负责人</td></tr>
+            <tr><td>真实 5 小时音频基准设备</td><td><span class="tag tag-high">数据依赖</span></td><td>10/28</td><td>性能线能否可信</td><td>先以当前 Linux 机器为唯一基准并记录配置</td><td>音频工程</td></tr>
+            <tr><td>内容负责人试用时间</td><td><span class="tag tag-high">外部依赖</span></td><td>11/06、11/25</td><td>V0.1/V0.5 是否能真实验收</td><td>由 QA 按脚本代跑功能；易用性指标顺延，不伪造</td><td>项目负责人</td></tr>
+            <tr><td>E4 VAD 区间数据</td><td><span class="tag tag-medium">硬依赖</span></td><td>11/22</td><td>E6 覆盖规则</td><td>先用“尾差 + 长间隙”启发式，VAD 状态标为未知</td><td>音频工程</td></tr>
+            <tr><td>E5 稳定来源映射</td><td><span class="tag tag-medium">硬依赖</span></td><td>11/29</td><td>成稿 QA 和 Markdown 导出</td><td>先导出逐字稿，不把无来源成稿标为最终版</td><td>桌面工程</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="capacity">
+      <h2>6. 产能分配与缓冲</h2>
+      <p class="subtle">计算口径：4 个双周迭代 × 每迭代 8 个有效工作日 × 0.7 产能系数 × 有效 FTE。这里是排期模型，不代表实际人员已到位。</p>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>能力</th><th>有效 FTE</th><th>8 周有效产能</th><th>计划分配</th><th>剩余</th><th>利用率</th></tr></thead>
+          <tbody>
+            <tr><td>桌面工程</td><td>1.0</td><td>22.4 人天</td><td>20.0</td><td>2.4</td><td>89.3%</td></tr>
+            <tr><td>音频/数据工程</td><td>1.0</td><td>22.4 人天</td><td>15.0</td><td>7.4</td><td>67.0%</td></tr>
+            <tr><td>产品/UX</td><td>0.5</td><td>11.2 人天</td><td>9.0</td><td>2.2</td><td>80.4%</td></tr>
+            <tr><td>测试/发布</td><td>0.5</td><td>11.2 人天</td><td>9.0</td><td>2.2</td><td>80.4%</td></tr>
+            <tr><td><b>合计</b></td><td><b>3.0</b></td><td><b>67.2 人天</b></td><td><b>53.0</b></td><td><b>14.2</b></td><td><b>78.9%</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="capacity-gauge">
+        <div class="gauge-label">计划占用</div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:78.9%;">53.0 / 67.2 人天</div></div>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <div class="buffer-bar" aria-label="产能缓冲分配">
+          <div class="buffer-segment" style="width:78.9%;background:#1a73e8;">确定性 P0/P1：53.0 天</div>
+          <div class="buffer-segment" style="width:11.9%;background:#fbbc04;color:#3c2f00;">风险：8.0</div>
+          <div class="buffer-segment" style="width:6%;background:#34a853;">发布：4.0</div>
+          <div class="buffer-segment" style="width:3.2%;background:#9334e6;">变更：2.2</div>
+        </div>
+      </div>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>缓冲池</th><th>人天</th><th>启用条件</th><th>禁止用途</th><th>批准人</th></tr></thead>
+          <tbody>
+            <tr><td>风险应对</td><td>8.0</td><td>长音频、数据安全、VAD、打包等已登记风险实际发生</td><td>普通新需求</td><td>技术负责人</td></tr>
+            <tr><td>发布稳定</td><td>4.0</td><td>W7/W8 阻塞缺陷、性能退化、升级回滚</td><td>UI 美化和 P2</td><td>测试负责人</td></tr>
+            <tr><td>变更储备</td><td>2.2</td><td>法律/数据安全或用户工作流的必要变更</td><td>云 ASR、协作、三平台</td><td>项目负责人</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>人员情景</h3>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>情景</th><th>可行周期</th><th>处理方式</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td>基线：3.0 有效 FTE</td><td>8 周</td><td>按本路线图，21.1% 缓冲</td><td><span class="tag tag-low">可执行</span></td></tr>
+            <tr><td>2 名全职工程 + 产品/测试仅零散支持</td><td>10–12 周</td><td>先保 V0.1/V0.5，V1.0 发布硬化顺延</td><td><span class="tag tag-medium">需重排</span></td></tr>
+            <tr><td>单人全栈开发</td><td>18–24 周</td><td>V0.1 4–6 周；先砍成稿高级编辑、VAD 或版本历史中的一个</td><td><span class="tag tag-high">8 周不可承诺</span></td></tr>
+            <tr><td>要求 Linux/macOS/Windows 同时首发</td><td>至少增加 3–5 周</td><td>增加打包、签名、路径、音频设备和回归矩阵</td><td><span class="tag tag-high">不在基线</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="content-track">
+      <h2>7. 语料生产轨：66 小时完美文稿</h2>
+      <div class="callout callout-blue">
+        软件 V1.0 的完成条件是“工具能够可靠承载全量项目”，不是“66 小时内容已经全部人工确认”。全量文稿日期必须在 V0.1 测得人工小时/音频小时后计算，否则只是拍脑袋。
+      </div>
+      <h3>分阶段生产</h3>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>阶段</th><th>窗口</th><th>输入</th><th>产出</th><th>决策</th></tr></thead>
+          <tbody>
+            <tr><td>C0 基线</td><td>W1–W2</td><td>清晰/一般/困难各 20 分钟</td><td>旧流程与样机的耗时、回放次数、错字率</td><td>确定真实倍率和 30% 提效目标是否合理</td></tr>
+            <tr><td>C1 试产</td><td>W3–W5</td><td>三类代表文件或 3 × 60 分钟</td><td>术语、不可辨政策、质量抽检和编辑规范</td><td>锁定每周产能和全量 ETA</td></tr>
+            <tr><td>C2 全量校对</td><td>最早 W6 开始</td><td>剩余 21 份音频</td><td>逐字校对稿、疑点闭环、覆盖报告</td><td>按周燃尽图管理，不与开发进度混算</td></tr>
+            <tr><td>C3 成稿与签署</td><td>随 C2 滚动</td><td>已确认逐字片段</td><td>章节化成稿、来源映射、最终签署包</td><td>每章节抽检通过后才完成</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>工时情景（66:08:49.916 全量）</h3>
+      <p class="subtle">公式：预计人工小时 = 66.15 音频小时 × 实测校对倍率；预计周数 = 人工小时 ÷ 每周可投入编辑小时。下表不含已有成果抵扣，也不含返工，只有在 C0 后才能选定一行。</p>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>校对倍率</th><th>总人工小时</th><th>每周 10 小时</th><th>每周 20 小时</th><th>每周 30 小时</th><th>适用解释</th></tr></thead>
+          <tbody>
+            <tr><td>1.5×</td><td>约 99.2 小时</td><td>9.9 周</td><td>5.0 周</td><td>3.3 周</td><td>字幕质量较好、疑点少</td></tr>
+            <tr><td>2.0×</td><td>约 132.3 小时</td><td>13.2 周</td><td>6.6 周</td><td>4.4 周</td><td>一般课堂录音的中位情景</td></tr>
+            <tr><td>2.5×</td><td>约 165.4 小时</td><td>16.5 周</td><td>8.3 周</td><td>5.5 周</td><td>不清楚片段多、需要成稿重写</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="subtle">建议承诺方式：V0.1 前不报全量完稿日；M3 后用实测倍率、已完成时长、疑点率和每周真实投入更新 ETA，并每周公布“已人工确认且可追溯的有效语音分钟数”。</p>
+    </section>
+
+    <section class="card" id="risks">
+      <h2>8. 风险矩阵与预案</h2>
+      <div class="risk-controls" role="group" aria-label="风险等级筛选">
+        <button class="risk-filter active" data-risk="all">全部</button>
+        <button class="risk-filter" data-risk="high">高风险</button>
+        <button class="risk-filter" data-risk="medium">中风险</button>
+        <button class="risk-filter" data-risk="low">低风险</button>
+      </div>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>风险</th><th>概率</th><th>影响</th><th>等级</th><th>触发条件</th><th>缓解措施</th><th>Plan B</th><th>Owner</th></tr></thead>
+          <tbody>
+            <tr class="risk-row" data-level="high"><td>R1</td><td>实际团队低于 3 个有效 FTE</td><td>高</td><td>高</td><td><span class="tag tag-high">高</span></td><td>10/27 仍未锁定人员</td><td>按角色确认可用人天，不按名义人数排期</td><td>2 FTE 改 10–12 周；单人改 18–24 周</td><td>项目负责人</td></tr>
+            <tr class="risk-row" data-level="high"><td>R2</td><td>5 小时音频 seek、波形或内存不达标</td><td>中</td><td>高</td><td><span class="tag tag-high">高</span></td><td>M1 基准失败</td><td>W1 提前探针；分块读取；后台索引</td><td>生成本地代理和预计算波形，延后实时强降噪</td><td>技术负责人</td></tr>
+            <tr class="risk-row" data-level="high"><td>R3</td><td>V1.0 P0 过多导致范围失控</td><td>高</td><td>高</td><td><span class="tag tag-high">高</span></td><td>任一 Sprint 新增超过 2 人天</td><td>W1 冻结 Must；两周一次变更窗；等量交换</td><td>先保逐字校对闭环，成稿高级体验或 VAD 高级模型降级</td><td>产品负责人</td></tr>
+            <tr class="risk-row" data-level="high"><td>R4</td><td>自动保存或数据库损坏导致丢稿</td><td>中</td><td>高</td><td><span class="tag tag-high">高</span></td><td>故障注入出现 RPO &gt; 5 秒或恢复失败</td><td>事务/WAL、从 V0.1 就做崩溃恢复、自动快照</td><td>编辑器进入只读保护并导出紧急恢复包</td><td>桌面工程</td></tr>
+            <tr class="risk-row" data-level="medium"><td>R5</td><td>VAD 对音乐和噪声误报过多</td><td>高</td><td>中</td><td><span class="tag tag-medium">中</span></td><td>试产真阳性率低于 60%</td><td>只做候选；人工批量分类；记录检测版本</td><td>退回尾差/长间隙启发式，VAD 状态显示未知</td><td>音频工程</td></tr>
+            <tr class="risk-row" data-level="high"><td>R6</td><td>内容负责人没有时间完成真实试产</td><td>中</td><td>高</td><td><span class="tag tag-high">高</span></td><td>试用日前 3 天仍未预留时段</td><td>现在锁定 W2/W5 试用日；拆成 60 分钟样本</td><td>QA 代跑功能；易用性和全量 ETA 明确标为未验证</td><td>项目负责人</td></tr>
+            <tr class="risk-row" data-level="medium"><td>R7</td><td>强降噪损伤辅音并误导确认</td><td>中</td><td>中</td><td><span class="tag tag-medium">中</span></td><td>原音/增强结论频繁冲突</td><td>原音默认、A/B、审计预设、增强不自动改字</td><td>V1.0 只保留温和“语音清晰”预设</td><td>音频工程</td></tr>
+            <tr class="risk-row" data-level="medium"><td>R8</td><td>FFmpeg 打包或许可问题拖延发布</td><td>中</td><td>中</td><td><span class="tag tag-medium">中</span></td><td>W1 未完成分发审查</td><td>M1 前完成组件与许可清单</td><td>试用版要求系统安装；正式包在 W8 前切换合规方案</td><td>技术负责人</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-2">
+        <div class="mini-card">
+          <h3>预案 A：人员不足</h3>
+          <p><b>触发：</b>10/27 后有效 FTE &lt; 3，或连续两周计划完成率 &lt; 75%。</p>
+          <p><b>Plan A：</b>补齐人员，维持 8 周。</p>
+          <p><b>Plan B：</b>顺延至 10–12 周，保持范围。</p>
+          <p><b>Plan C：</b>单人 18–24 周；先交“逐字校对 MVP”，成稿与 VAD 后置。</p>
+        </div>
+        <div class="mini-card">
+          <h3>预案 B：W5 前范围爆炸</h3>
+          <p><b>触发：</b>已用风险缓冲超过 50%，且 E3/E4/E5 任一未达退出条件。</p>
+          <p><b>Plan A：</b>冻结新需求，用 W5 修复关键流程。</p>
+          <p><b>Plan B：</b>成稿先用受控 Markdown 文本框，不做高级富文本体验。</p>
+          <p><b>Plan C：</b>VAD 降级为候选报告；不阻塞逐字校对 MVP，但不得宣称覆盖 QA 完成。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="metrics">
+      <h2>9. 每阶段成功指标</h2>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>里程碑</th><th>北极星指标</th><th>过程指标</th><th>护栏指标</th><th>判定</th></tr></thead>
+          <tbody>
+            <tr><td>M1 技术可行</td><td>关键技术风险有实测结论</td><td>5 小时样本、SRT、DB、FFmpeg 四项探针完成</td><td>内存建议 ≤ 1.5 GiB；源哈希不变</td><td>技术负责人签字</td></tr>
+            <tr><td>M2 V0.1</td><td>≥ 60 分钟已人工确认且可追溯</td><td>快捷操作、平均回放次数、样本校对耗时</td><td>0 丢稿；RPO ≤ 5 秒；同步 ≤ 100 ms；往返 0 ms</td><td>产品 + 内容负责人</td></tr>
+            <tr><td>M3 V0.5</td><td>三类难度样本端到端完成</td><td>配对率 100%；疑点解决率；VAD 真阳性率；效率倍率</td><td>关键 P0 缺陷 0；严重内容错误 0</td><td>试产评审</td></tr>
+            <tr><td>M4 RC</td><td>AC-001 至 AC-040 全通过</td><td>全量导入、质量扫描、导出回读、升级回滚</td><td>4 小时无崩溃；数据/安全/导出阻塞缺陷 0</td><td>Go/No-Go 会议</td></tr>
+            <tr><td>M5 V1.0</td><td>66 小时项目具备闭环处理能力</td><td>安装成功、文档齐全、恢复演练、验收包重导入</td><td>仍保留可用缓冲；无未披露限制</td><td>项目负责人签署</td></tr>
+            <tr><td>C2/C3 全量文稿</td><td>已人工确认且可追溯的有效语音分钟数</td><td>每周净增分钟、疑点率、接受不可辨率、成稿批准率</td><td>严重错误一票退回；来源覆盖 100%</td><td>章节级质量签署</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="governance">
+      <h2>10. 执行节奏与变更治理</h2>
+      <div class="grid-3">
+        <div class="mini-card">
+          <h3>每周节奏</h3>
+          <ul>
+            <li>周一：确认本周唯一主目标和风险。</li>
+            <li>周三：15 分钟风险门，只处理红灯。</li>
+            <li>周五：真实素材演示，不接受纯口头“完成”。</li>
+            <li>每天：异步更新阻塞、剩余量和缓冲消耗。</li>
+          </ul>
+        </div>
+        <div class="mini-card">
+          <h3>双周变更窗</h3>
+          <ul>
+            <li>每两周评审一次路线图。</li>
+            <li>任何新增需写清加入、移出和里程碑影响。</li>
+            <li>P0 插入必须等量移出 P0/P1。</li>
+            <li>缓冲消耗超过 50% 时冻结 P2。</li>
+          </ul>
+        </div>
+        <div class="mini-card">
+          <h3>红灯条件</h3>
+          <ul>
+            <li>关键路径 Epic 延误 ≥ 3 个工作日。</li>
+            <li>计划完成率连续两周 &lt; 75%。</li>
+            <li>风险缓冲使用 &gt; 8 人天。</li>
+            <li>发生一次不可恢复丢稿或源文件被改。</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>里程碑检查清单</h3>
+      <ul class="checklist">
+        <li>交付物已在真实“环境画卷”素材上演示，而非只用短假数据。</li>
+        <li>成功指标有数字、有证据、有负责人签字。</li>
+        <li>失败和降级路径已经实际测试。</li>
+        <li>源音频和源字幕哈希未变化。</li>
+        <li>新增范围、缓冲消耗和延期影响已写入变更记录。</li>
+        <li>下一里程碑的硬依赖已经可用，不把风险推到最后一周。</li>
+      </ul>
+    </section>
+
+    <section class="card" id="changelog">
+      <h2>11. 变更记录</h2>
+      <div class="data-wrap">
+        <table class="data-table">
+          <thead><tr><th>版本</th><th>日期</th><th>变更</th><th>影响</th><th>作者</th></tr></thead>
+          <tbody>
+            <tr><td>v1.0</td><td>2026-10-25</td><td>基于听校 PRD V1.0.0 创建 8 周软件交付与独立语料生产路线图</td><td>建立基线；D1–D6 待逐项关闭</td><td>Codex</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="subtle">下一次计划性更新：M1 技术可行性门完成后（2026-11-01）。若人员假设、平台范围或不可辨政策发生变化，应立即发布 v1.1，而不是等到双周评审。</p>
+    </section>
+  </main>
+
+  <button class="doc-fab" id="docFab" aria-label="打开路线图 Markdown 文档">
+    <span class="doc-fab-label">路线图文档</span>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+      <polyline points="14 2 14 8 20 8"></polyline>
+      <line x1="16" y1="13" x2="8" y2="13"></line>
+      <line x1="16" y1="17" x2="8" y2="17"></line>
+    </svg>
+  </button>
+
+  <div class="doc-overlay" id="docOverlay"></div>
+  <aside class="doc-panel" id="docPanel" aria-hidden="true" aria-label="路线图 Markdown 文档">
+    <div class="doc-panel-header">
+      <h3>路线图文档</h3>
+      <div class="doc-actions">
+        <button class="panel-btn" id="copyBtn">复制 Markdown</button>
+        <button class="panel-btn" id="closeBtn" aria-label="关闭">关闭</button>
+      </div>
+    </div>
+    <div class="doc-body"><pre id="docContent"></pre></div>
+  </aside>
+
+  <script type="text/plain" id="roadmapMarkdown">
+# 听校（TingProof）2026 Q4 路线图
+
+> 日期：2026-10-25 | 版本：v1.0 | 负责人：产品/研发负责人（待指定）
+> 周期：2026-10-26 至 2026-12-20（8 周）
+
+## 0. 排期假设
+
+- 团队：1 名桌面工程师、1 名音频/数据工程师、0.5 名产品/设计、0.5 名测试，共 3 个有效 FTE。
+- 有效产能：67.2 人天；确定性计划 53 人天；缓冲 14.2 人天（21.1%）。
+- 首发：本地桌面、Linux；不含实时协作、云 ASR、移动端和三平台正式首发。
+- 单人开发不可沿用 8 周日期，同等范围应重排为约 18–24 周。
+
+## 1. 季度目标
+
+| # | 目标 | 关键结果 | 优先级 |
+|---|---|---|---|
+| O1 | 用真实长音频证明人工校对主链路可用 | 连续校对 60 分钟；0 丢稿；SRT 往返 0 ms；RPO ≤ 5 秒 | P0 |
+| O2 | 扩成可生产工具 | 21/21 配对；三类难度试产；增强、VAD、三层文稿和质量报告可用 | P0 |
+| O3 | 发布可承载 66 小时项目的 V1.0 | 40 条 AC 全过；4 小时稳定性；全量项目可导入、签署、导出、重导入 | P0 |
+
+## 2. Epic 拆解
+
+| Epic | 周期 | 工作量 | 主责 | 依赖 | 状态 |
+|---|---:|---:|---|---|---|
+| E0 决策、架构与性能探针 | W1 | 4 人天 | 跨职能 | D1–D5 | 🔵 未开始 |
+| E1 本地项目与数据安全底座 | W1–W2 | 5 人天 | 桌面工程 | E0 | 🔵 未开始 |
+| E2 长音频听校纵向闭环 | W1–W2 | 10 人天 | 桌面 + 音频 | E0、E1 | 🔵 未开始 |
+| E3 批量项目与生产力工具 | W3–W4 | 5 人天 | 桌面 + 产品 | E1、E2 | 🔵 未开始 |
+| E4 音频证据辅助与覆盖检测 | W2–W4 | 6 人天 | 音频/数据 | E0、E2 | 🔵 未开始 |
+| E5 三层文稿与来源追溯 | W3–W5 | 6 人天 | 产品 + 桌面 | E1、E2、D2 | 🔵 未开始 |
+| E6 质量闸门、签署与导出 | W5–W7 | 8 人天 | 跨职能 | E3、E4、E5 | 🔵 未开始 |
+| E7 可靠性、性能与发布 | W6–W8 | 9 人天 | 桌面 + 测试 | E1–E6 | 🔵 未开始 |
+
+## 3. 里程碑
+
+| 里程碑 | 日期 | 交付物 | 成功指标 | 状态 |
+|---|---|---|---|---|
+| M0 需求基线 | 2026-10-25 | PRD、待确认项、路线图 | 真实规模、三层模型、40 条 AC 入基线 | 🟢 已完成 |
+| M1 技术可行性门 | 2026-11-01 | 5 小时音频基准、ADR、数据模型、Plan B | 关键技术风险有实测结论 | 🔵 未开始 |
+| M2 V0.1 纵向样机 | 2026-11-08 | 单文件完整听校闭环 | ≥ 60 分钟确认；0 丢稿；SRT 往返 0 ms | 🔵 未开始 |
+| M3 V0.5 生产试用 | 2026-11-29 | 批量项目、增强、VAD、三层文稿、试产 | 21/21 配对；三类样本；关键 P0 为 0 | 🔵 未开始 |
+| M4 V1.0 RC | 2026-12-13 | 质量闸门、快照、导出、候选包 | 40 AC 全过；4 小时稳定性；阻塞缺陷 0 | 🔵 未开始 |
+| M5 V1.0 发布 | 2026-12-20 | Linux 包、文档、恢复演练、验收包 | 66 小时项目具备闭环处理能力 | 🔵 未开始 |
+
+## 4. 关键路径
+
+D1–D5 决策 → E0 技术探针 → E1/E2 纵向闭环 → E3/E4/E5 生产化 → E6 质量与导出 → E7 发布
+
+关键路径不包含云 ASR、多人协作、移动端或三平台正式首发。新增范围必须等量移出当前 P0/P1，或明确顺延 M5。
+
+## 5. 产能分配
+
+| 能力 | 有效 FTE | 有效产能 | 已分配 | 剩余 |
+|---|---:|---:|---:|---:|
+| 桌面工程 | 1.0 | 22.4 | 20.0 | 2.4 |
+| 音频/数据 | 1.0 | 22.4 | 15.0 | 7.4 |
+| 产品/UX | 0.5 | 11.2 | 9.0 | 2.2 |
+| 测试/发布 | 0.5 | 11.2 | 9.0 | 2.2 |
+| 合计 | 3.0 | 67.2 | 53.0 | 14.2 |
+
+- 确定性 P0/P1：53.0 人天（78.9%）
+- 风险应对：8.0 人天（11.9%）
+- 发布稳定：4.0 人天（6.0%）
+- 变更储备：2.2 人天（3.2%）
+
+## 6. 风险矩阵
+
+| 风险 | 概率 | 影响 | 等级 | 缓解 | Plan B |
+|---|---|---|---|---|---|
+| 实际团队低于 3 个有效 FTE | 高 | 高 | 高 | 10/27 锁定真实可用人天 | 2 FTE 改 10–12 周；单人改 18–24 周 |
+| 长音频 seek、波形或内存不达标 | 中 | 高 | 高 | W1 技术探针 | 本地代理 + 预计算波形 |
+| P0 过多导致范围失控 | 高 | 高 | 高 | W1 冻结 Must；等量交换 | 先保逐字校对闭环 |
+| 保存/数据库故障导致丢稿 | 中 | 高 | 高 | 事务、WAL、故障注入、快照 | 只读保护 + 紧急恢复包 |
+| 内容负责人无时间试产 | 中 | 高 | 高 | 预留 W2/W5 试用日 | QA 代跑功能，易用性不伪造 |
+| VAD 误报过多 | 高 | 中 | 中 | 只产候选，人工裁决 | 尾差/长间隙启发式 |
+| 强降噪损伤辅音 | 中 | 中 | 中 | 原音默认、A/B | 只保留温和增强 |
+| FFmpeg 打包/许可拖延 | 中 | 中 | 中 | W1 审查 | 试用版要求系统安装 |
+
+## 7. 缓冲与变更策略
+
+- 每两周更新一次路线图。
+- P0 插入必须等量移出另一个 P0/P1。
+- 风险缓冲只处理已登记技术和数据风险。
+- W7 起只收阻塞级修复。
+- 若关键路径延误 ≥ 3 个工作日、连续两周完成率 < 75% 或风险缓冲耗尽，则路线图转红并重排。
+
+## 8. 语料生产轨
+
+软件 V1.0 不等于 66 小时内容已经全部人工校完。完稿 ETA 在 V0.1/V0.5 实测后计算：
+
+预计人工小时 = 66.15 音频小时 × 实测校对倍率
+
+| 倍率 | 总人工小时 | 每周 10 小时 | 每周 20 小时 | 每周 30 小时 |
+|---:|---:|---:|---:|---:|
+| 1.5× | 约 99.2 | 9.9 周 | 5.0 周 | 3.3 周 |
+| 2.0× | 约 132.3 | 13.2 周 | 6.6 周 | 4.4 周 |
+| 2.5× | 约 165.4 | 16.5 周 | 8.3 周 | 5.5 周 |
+
+完稿北极星：已人工确认且可追溯的有效语音分钟数。
+
+## 9. 变更记录
+
+| 版本 | 日期 | 变更 |
+|---|---|---|
+| v1.0 | 2026-10-25 | 创建 8 周软件交付与独立语料生产路线图 |
+  </script>
+
+  <script>
+    (function renderGantt() {
+      var weeks = [
+        ["W1", "10/26"], ["W2", "11/02"], ["W3", "11/09"], ["W4", "11/16"],
+        ["W5", "11/23"], ["W6", "11/30"], ["W7", "12/07"], ["W8", "12/14"]
+      ];
+      var epics = [
+        { id: "E0", name: "决策、架构与性能探针", owner: "跨职能", effort: "4 人天", start: 0, duration: 1, team: "team-cross", exit: "关键技术实测 + Plan B" },
+        { id: "E1", name: "本地项目与数据安全底座", owner: "桌面工程", effort: "5 人天", start: 0, duration: 2, team: "team-desktop", exit: "自动保存与恢复可用" },
+        { id: "E2", name: "长音频听校纵向闭环", owner: "桌面 + 音频", effort: "10 人天", start: 0, duration: 2, team: "team-desktop", exit: "60 分钟连续试用" },
+        { id: "E3", name: "批量项目与生产力工具", owner: "桌面 + 产品", effort: "5 人天", start: 2, duration: 2, team: "team-desktop", exit: "21 对导入与大列表" },
+        { id: "E4", name: "音频证据辅助与覆盖检测", owner: "音频/数据", effort: "6 人天", start: 1, duration: 3, team: "team-audio", exit: "增强/VAD 可降级" },
+        { id: "E5", name: "三层文稿与来源追溯", owner: "产品 + 桌面", effort: "6 人天", start: 2, duration: 3, team: "team-product", exit: "成稿来源 100%" },
+        { id: "E6", name: "质量闸门、签署与导出", owner: "跨职能", effort: "8 人天", start: 4, duration: 3, team: "team-cross", exit: "阻塞清零才能签署" },
+        { id: "E7", name: "可靠性、性能与发布", owner: "桌面 + 测试", effort: "9 人天", start: 5, duration: 3, team: "team-qa", exit: "40 AC + 4 小时稳定性" }
+      ];
+      var milestones = [
+        { week: 1, name: "M1 · 技术门" },
+        { week: 2, name: "M2 · V0.1" },
+        { week: 5, name: "M3 · V0.5" },
+        { week: 7, name: "M4 · RC" },
+        { week: 8, name: "M5 · V1.0" }
+      ];
+      var header = document.getElementById("ganttHeader");
+      weeks.forEach(function(item) {
+        var cell = document.createElement("div");
+        cell.className = "gantt-week";
+        cell.innerHTML = "<b>" + item[0] + "</b>" + item[1];
+        header.appendChild(cell);
+      });
+      var body = document.getElementById("ganttBody");
+      epics.forEach(function(epic) {
+        var row = document.createElement("div");
+        row.className = "gantt-row";
+        var label = document.createElement("div");
+        label.className = "gantt-label";
+        label.innerHTML = "<strong>" + epic.id + " · " + epic.name + "</strong><small>" + epic.owner + " · " + epic.effort + "</small>";
+        row.appendChild(label);
+        var area = document.createElement("div");
+        area.className = "gantt-area";
+        for (var i = 0; i < 8; i += 1) {
+          var grid = document.createElement("div");
+          grid.className = "gantt-grid";
+          area.appendChild(grid);
+        }
+        var bar = document.createElement("div");
+        bar.className = "gantt-bar " + epic.team;
+        bar.style.left = (epic.start / 8 * 100) + "%";
+        bar.style.width = (epic.duration / 8 * 100) + "%";
+        bar.textContent = epic.id + " · " + epic.name;
+        bar.title = epic.owner + "；W" + (epic.start + 1) + "–W" + (epic.start + epic.duration) + "；" + epic.effort + "；退出：" + epic.exit;
+        area.appendChild(bar);
+        milestones.forEach(function(ms) {
+          if (ms.week === epic.start + epic.duration) {
+            var diamond = document.createElement("span");
+            diamond.className = "gantt-milestone";
+            diamond.style.left = (ms.week / 8 * 100) + "%";
+            diamond.title = ms.name;
+            area.appendChild(diamond);
+          }
+        });
+        row.appendChild(area);
+        body.appendChild(row);
+      });
+    })();
+
+    (function riskFilters() {
+      var buttons = document.querySelectorAll(".risk-filter");
+      var rows = document.querySelectorAll(".risk-row");
+      buttons.forEach(function(button) {
+        button.addEventListener("click", function() {
+          var selected = button.getAttribute("data-risk");
+          buttons.forEach(function(item) { item.classList.remove("active"); });
+          button.classList.add("active");
+          rows.forEach(function(row) {
+            row.hidden = selected !== "all" && row.getAttribute("data-level") !== selected;
+          });
+        });
+      });
+    })();
+
+    (function docPanel() {
+      var fab = document.getElementById("docFab");
+      var overlay = document.getElementById("docOverlay");
+      var panel = document.getElementById("docPanel");
+      var close = document.getElementById("closeBtn");
+      var copy = document.getElementById("copyBtn");
+      var source = document.getElementById("roadmapMarkdown").textContent.trim();
+      document.getElementById("docContent").textContent = source;
+
+      function openPanel() {
+        panel.classList.add("open");
+        overlay.classList.add("open");
+        panel.setAttribute("aria-hidden", "false");
+        close.focus();
+      }
+      function closePanel() {
+        panel.classList.remove("open");
+        overlay.classList.remove("open");
+        panel.setAttribute("aria-hidden", "true");
+        fab.focus();
+      }
+      function legacyCopy(text) {
+        var field = document.createElement("textarea");
+        field.value = text;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        document.execCommand("copy");
+        document.body.removeChild(field);
+      }
+      function showCopied() {
+        copy.textContent = "已复制";
+        copy.classList.add("copied");
+        window.setTimeout(function() {
+          copy.textContent = "复制 Markdown";
+          copy.classList.remove("copied");
+        }, 1800);
+      }
+
+      fab.addEventListener("click", openPanel);
+      close.addEventListener("click", closePanel);
+      overlay.addEventListener("click", closePanel);
+      document.addEventListener("keydown", function(event) {
+        if (event.key === "Escape" && panel.classList.contains("open")) closePanel();
+      });
+      copy.addEventListener("click", function() {
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(source).then(showCopied).catch(function() {
+            legacyCopy(source);
+            showCopied();
+          });
+        } else {
+          legacyCopy(source);
+          showCopied();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
