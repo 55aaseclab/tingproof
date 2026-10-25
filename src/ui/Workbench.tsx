@@ -32,7 +32,10 @@ import {
   planConfirm,
   planLoopToggle,
   planUnconfirm,
+  reuseTimelineData,
+  sameSortedOrderShape,
   segmentIdForRange,
+  type TimelineSegLike,
 } from "../core/selection.js";
 import { randomUuid, sha256Hex } from "../core/identity.js";
 import {
@@ -70,6 +73,8 @@ interface Props {
   initialIssues: IssueRecord[];
   onBack: () => void;
   onRelocated: (meta: ProjectMeta, file: File) => void;
+  /** 诊断/测试探针：每个 SegmentRow 提交后回调一次；生产不传即零开销、不污染 DOM。 */
+  segmentRenderProbe?: (segmentId: string) => void;
 }
 
 export function Workbench({
@@ -80,6 +85,7 @@ export function Workbench({
   initialIssues,
   onBack,
   onRelocated,
+  segmentRenderProbe,
 }: Props) {
   const [segments, setSegments] = useState<SegmentRecord[]>(initialSegments);
   const [issues, setIssues] = useState<IssueRecord[]>(initialIssues);
@@ -101,10 +107,22 @@ export function Workbench({
   segmentsRef.current = segments;
   metaRef.current = meta;
 
-  const sortedSegments = useMemo(
-    () => [...segments].sort((a, b) => a.startMs - b.startMs),
-    [segments],
-  );
+  // V1.0.5 AC-048 + 第 10 轮审计 C：时间范围未变化时不重排完整时间轴——
+  // 按 segmentId 建 Map，对缓存排序顺序中的每个 ID 精确比较 start/end，
+  // 并把最新文本/状态对象映射进既有顺序；初始输入未排序也不会每键重排。
+  const sortedCacheRef = useRef<{ value: SegmentRecord[] } | null>(null);
+  const sortedSegments = useMemo(() => {
+    const byId = new Map(segments.map((sg) => [sg.segmentId, sg]));
+    const cached = sortedCacheRef.current;
+    if (cached && sameSortedOrderShape(cached.value, byId)) {
+      const value = cached.value.map((sg) => byId.get(sg.segmentId) ?? sg);
+      sortedCacheRef.current = { value };
+      return value;
+    }
+    const value = [...segments].sort((a, b) => a.startMs - b.startMs);
+    sortedCacheRef.current = { value };
+    return value;
+  }, [segments]);
   sortedRef.current = sortedSegments;
 
   const keymap = useKeymap();
@@ -118,13 +136,21 @@ export function Workbench({
   useEffect(() => save.subscribe(setSaveStatus), [save]);
   useEffect(() => () => save.dispose(), [save]);
 
-  const enqueueSegmentSave = useCallback(
+  /** 正文草稿（仅内存）：输入即时显示的载体；flush 时合并进持久层。 */
+  const draftsRef = useRef(new Map<string, string>());
+  /** 正在 IME 组合中的段：flush 时跳过，杜绝保存半字（composition end 会重新入队）。 */
+  const composingSegmentsRef = useRef(new Set<string>());
+
+  const persistSegment = useCallback(
     (segmentId: string) => {
       save.enqueue(`segment:${segmentId}`, async () => {
         const seg = segmentsRef.current.find((s) => s.segmentId === segmentId);
         if (!seg) return;
+        // 中文 IME 组合中：跳过半字；composition end 会重新入队提交完整文本。
+        if (composingSegmentsRef.current.has(segmentId)) return;
+        const draft = draftsRef.current.get(segmentId);
         await updateSegment(segmentId, {
-          correctedText: seg.correctedText,
+          correctedText: draft ?? seg.correctedText,
           status: seg.status,
         });
       });
@@ -421,25 +447,40 @@ export function Workbench({
   const nextStatusAfterEdit = (prev: SegmentStatus): SegmentStatus =>
     prev === "questioned" ? "questioned" : "editing";
 
+  /**
+   * 正文草稿变更（V1.0.5 AC-048）：后续纯正文逐键不触发整表 React 状态更新
+   * （同引用 bail）；首键可能有一次状态迁移渲染（确认→校对中），
+   * saveStatus 的 saving 发布也各可能一次渲染。文本由非受控 textarea 原生显示。
+   * IME 组合中间态进草稿但不调度持久化；composition end 后调度提交完整文本。
+   */
   const editSegment = useCallback(
     (segmentId: string, text: string, composing: boolean) => {
-      setSegments((prev) =>
-        prev.map((s) =>
-          s.segmentId === segmentId
-            ? { ...s, correctedText: text, status: nextStatusAfterEdit(s.status) }
-            : s,
-        ),
-      );
-      if (!composing) enqueueSegmentSave(segmentId);
+      draftsRef.current.set(segmentId, text);
+      setSegments((prev) => {
+        const seg = prev.find((s) => s.segmentId === segmentId);
+        if (!seg || seg.status === "editing" || seg.status === "questioned") return prev;
+        return prev.map((s) =>
+          s.segmentId === segmentId ? { ...s, status: nextStatusAfterEdit(s.status) } : s,
+        );
+      });
+      if (!composing) persistSegment(segmentId);
     },
-    [enqueueSegmentSave],
+    [persistSegment],
+  );
+
+  const onCompositionStart = useCallback(
+    (segmentId: string) => {
+      composingSegmentsRef.current.add(segmentId);
+    },
+    [],
   );
 
   const onCompositionEnd = useCallback(
     (segmentId: string) => {
-      enqueueSegmentSave(segmentId);
+      composingSegmentsRef.current.delete(segmentId);
+      persistSegment(segmentId); // 提交完整文本（约 500ms 后落盘）
     },
-    [enqueueSegmentSave],
+    [persistSegment],
   );
 
   const setStatus = useCallback(
@@ -447,9 +488,9 @@ export function Workbench({
       setSegments((prev) =>
         prev.map((s) => (s.segmentId === segmentId ? { ...s, status } : s)),
       );
-      enqueueSegmentSave(segmentId);
+      persistSegment(segmentId); // 合并未落盘草稿，避免状态写入覆盖文本
     },
-    [enqueueSegmentSave],
+    [persistSegment],
   );
 
   const focusSegmentEditor = useCallback((segmentId: string) => {
@@ -470,7 +511,10 @@ export function Workbench({
    */
   const applyConfirm = useCallback(
     (segmentId: string, opts: { advance: boolean }) => {
-      const plan = planConfirm(sortedRef.current, segmentId);
+      // 确认为低频动作：点击时构造单段草稿覆盖（不逐键全量 map），
+      // 保证“清空后确认被阻止、输入后确认被放行”都与最新草稿一致（第 13 轮审计 P0）。
+      const draft = draftsRef.current.get(segmentId);
+      const plan = planConfirm(sortedRef.current, segmentId, draft);
       if (!plan.ok) {
         window.alert(plan.reason);
         return;
@@ -487,7 +531,13 @@ export function Workbench({
         selectSegment(plan.confirmedId, {});
       }
     },
-    [setStatus, focusSegmentEditor, updateSelected, selectSegment],
+    [setStatus, focusSegmentEditor, selectSegment],
+  );
+
+  /** 稳定行内确认回调：父渲染不产生新函数，保住 SegmentRow 的 memo 跳过（第 10 轮审计 1）。 */
+  const handleRowConfirm = useCallback(
+    (segmentId: string) => applyConfirm(segmentId, { advance: false }),
+    [applyConfirm],
   );
 
   /** 点击条目 / 聚焦文本框 / Alt+←→ / 回到播放点：选中 + 精确定位 startMs；播放中先暂停；不自动播放。 */
@@ -523,6 +573,17 @@ export function Workbench({
     [updateSelected],
   );
 
+  const handleTimelineSeek = useCallback((ms: number) => playerRef.current.seek(ms), []);
+
+  // 第 10 轮审计 item 3 + 第 11 轮审计 3：先结构比较（直接用 SegmentRecord 字段），
+  // 纯正文变化返回同一引用（React.memo 跳过 Timeline render）；不每键先 map 1,676 个对象。
+  const timelineDataCacheRef = useRef<TimelineSegLike[] | null>(null);
+  const timelineData = useMemo(() => {
+    const { reused, value } = reuseTimelineData(timelineDataCacheRef.current, segments);
+    if (!reused) timelineDataCacheRef.current = value;
+    return value;
+  }, [segments]);
+
   /** 底部播放按钮与 F8 共用：对当前选中段做范围感知播放/暂停切换。 */
   const handleMainToggle = useCallback(() => {
     const seg = sortedRef.current.find((s) => s.segmentId === selectedIdRef.current);
@@ -546,7 +607,15 @@ export function Workbench({
 
   // ---------- 疑点（写入纳入保存协调器） ----------
 
-  const unresolved = issues.filter((i) => i.status === "open");
+  const unresolved = useMemo(
+    () => issues.filter((i) => i.status === "open"),
+    [issues],
+  );
+  // 疑点集合不变时保持同一 Map 实例：正文编辑不会让未修改行失去 memo 跳过能力。
+  const unresolvedBySegment = useMemo(
+    () => buildUnresolvedBySegment(unresolved),
+    [unresolved],
+  );
 
   const createIssue = useCallback(
     (segmentId: string, type: IssueType, severity: IssueSeverity, note: string) => {
@@ -579,11 +648,11 @@ export function Workbench({
               : s,
           ),
         );
-        enqueueSegmentSave(segmentId);
+        persistSegment(segmentId);
       }
       save.schedule();
     },
-    [save, enqueueSegmentSave],
+    [save, persistSegment],
   );
 
   /** 行内类型选择层选定后创建：severity 恒为 blocking、备注为空（PRD V1.0.4）。 */
@@ -634,11 +703,11 @@ export function Workbench({
               : s,
           ),
         );
-        enqueueSegmentSave(issue.segmentId);
+        persistSegment(issue.segmentId);
       }
       save.schedule();
     },
-    [save, enqueueSegmentSave],
+    [save, persistSegment],
   );
 
   const removeIssue = useCallback(
@@ -663,12 +732,12 @@ export function Workbench({
                 : s,
             ),
           );
-          enqueueSegmentSave(issue.segmentId);
+          persistSegment(issue.segmentId);
         }
       }
       save.schedule();
     },
-    [save, enqueueSegmentSave],
+    [save, persistSegment],
   );
 
   // ---------- 键盘（F7 后退 / F8 播放暂停 / F9 前进，可配置） ----------
@@ -760,8 +829,9 @@ export function Workbench({
 
   // ---------- 导出 ----------
 
-  const exportPreview = useMemo(
-    () => buildExportPreview(segments, issues),
+  // V1.0.5 AC-048：导出预览是导出时才需要的全量计算——不在输入路径上逐键重建。
+  const computeExportPreview = useCallback(
+    () => buildExportPreview(segments, issues, draftsRef.current),
     [segments, issues],
   );
 
@@ -775,6 +845,7 @@ export function Workbench({
 
   const doExport = useCallback(
     async (fileName: string): Promise<string> => {
+      const exportPreview = computeExportPreview();
       // 空文本段是明确阻塞项：空段导出后必然无法通过回读校验（见 exportRoundTrip 测试）。
       if (exportPreview.emptyTextCount > 0) {
         throw new Error(
@@ -817,7 +888,7 @@ export function Workbench({
       }
       return `✔ 已写出并回读校验通过（${check.cueCountActual} 段，写出方式：File System Access API）。`;
     },
-    [exportPreview, sourceHandleRefs],
+    [computeExportPreview, sourceHandleRefs],
   );
 
   // ---------- 渲染 ----------
@@ -876,12 +947,14 @@ export function Workbench({
             <SegmentList
               segments={sortedSegments}
               selectedId={selectedId}
-              unresolvedBySegment={unresolvedBySegment(unresolved)}
-              onEdit={editSegment}
+              unresolvedBySegment={unresolvedBySegment}
+              onDraftChange={editSegment}
+              onCompositionStart={onCompositionStart}
               onCompositionEnd={onCompositionEnd}
-              onConfirmRow={(id) => applyConfirm(id, { advance: false })}
+              onConfirmRow={handleRowConfirm}
               onUnconfirmRow={unconfirmSegment}
               onLocate={handleRowLocate}
+              renderProbe={segmentRenderProbe}
               onTogglePlay={handleRowTogglePlay}
               playingSegmentId={player.playing ? selectedId : null}
               onLoop={toggleLoopSegment}
@@ -903,10 +976,10 @@ export function Workbench({
 
       <div className="player-bar">
         <Timeline
-          segments={sortedSegments}
+          segments={timelineData}
           durationMs={totalMs}
           loop={player.loop}
-          onSeek={(ms) => player.seek(ms)}
+          onSeek={handleTimelineSeek}
           subscribeCurrentMs={player.subscribeCurrentMs}
         />
         <div className="player-controls">
@@ -989,7 +1062,7 @@ export function Workbench({
 
       {showExport && (
         <ExportDialog
-          preview={exportPreview}
+          computePreview={computeExportPreview}
           suggestedName={`${meta.normalizedStem}.校对.V001.srt`}
           fsAccess={supportsFileSystemAccess()}
           sourceGuardReady={canVerifySources(sourceHandleRefs)}
@@ -1001,7 +1074,7 @@ export function Workbench({
   );
 }
 
-function unresolvedBySegment(unresolved: IssueRecord[]): Map<string, number> {
+function buildUnresolvedBySegment(unresolved: IssueRecord[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const i of unresolved) m.set(i.segmentId, (m.get(i.segmentId) ?? 0) + 1);
   return m;

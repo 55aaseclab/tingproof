@@ -74,6 +74,58 @@ describe("SaveCoordinator", () => {
     vi.useRealTimers();
   });
 
+  it("已处于 saving 时 schedule 不重复发布相同状态（V1.0.5 AC-048）", async () => {
+    const c = new SaveCoordinator(0);
+    const seen: string[] = [];
+    c.subscribe((s) => seen.push(s.state));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    c.enqueue("a", async () => { await gate; }); // flush 保持 saving
+    const flushPromise = c.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(c.state.state).toBe("saving");
+    // 逐键输入：多次 schedule 都不重复发布 saving。
+    c.enqueue("b", async () => undefined);
+    c.schedule();
+    c.schedule();
+    c.schedule();
+    const savingCount = seen.filter((x) => x === "saving").length;
+    expect(savingCount).toBe(1); // 只通知一次
+    release();
+    await flushPromise;
+    expect(c.state.state).toBe("saved");
+  });
+
+  it("完整防抖生命周期：saving 仅发布一次，saved 一次（schedule→500ms→flush→mid-flush join）", async () => {
+    vi.useFakeTimers();
+    const c = new SaveCoordinator(500);
+    const seen: string[] = [];
+    c.subscribe((s) => seen.push(s.state));
+    let release1: () => void = () => undefined;
+    const gate1 = new Promise<void>((r) => { release1 = r; });
+    c.enqueue("op1", async () => { await gate1; });
+    c.schedule(); // idle → saving（第 1 次）
+    await vi.advanceTimersByTimeAsync(500); // 防抖到点 → flush 开始（已 saving，不重复发布）
+    expect(c.state.state).toBe("saving");
+    const savingBefore = seen.filter((x) => x === "saving").length;
+    expect(savingBefore).toBe(1);
+    // flush 进行中继续入队 + schedule + join flush：仍不重复发布 saving。
+    c.enqueue("op2", async () => undefined);
+    c.schedule();
+    const joined = c.flush();
+    release1(); // 先释放再等待 join
+    await joined;
+    await vi.advanceTimersByTimeAsync(500);
+    await Promise.resolve();
+    await Promise.resolve();
+    const savingAfter = seen.filter((x) => x === "saving").length;
+    expect(savingAfter).toBe(1); // 全生命周期只发布一次 saving
+    expect(seen[seen.length - 1]).toBe("saved");
+    expect(c.state.state).toBe("saved");
+    vi.useRealTimers();
+  });
+
   it("空队列 flush：saving → saved；但不会把 failed 洗成 saved", async () => {
     const c = new SaveCoordinator(0);
     c.enqueue("x", async () => {

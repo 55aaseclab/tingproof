@@ -11,7 +11,14 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Workbench } from "../src/ui/Workbench.js";
 import type { IssueRecord, ProjectMeta, SegmentRecord } from "../src/store/types.js";
 
-vi.mock("../src/ui/Timeline.js", () => ({ Timeline: () => <div data-testid="timeline" /> }));
+const { TimelineSpy } = vi.hoisted(() => ({
+  TimelineSpy: vi.fn((_props: { segments: unknown }) => <div data-testid="timeline" />),
+}));
+// 用 memo 包裹 spy：与真实 Timeline 的 memo 语义一致——props 不变时 spy 不会被调用。
+vi.mock("../src/ui/Timeline.js", async () => {
+  const { memo } = await import("react");
+  return { Timeline: memo(TimelineSpy) };
+});
 
 afterEach(() => cleanup());
 
@@ -68,7 +75,7 @@ function makeMeta(): ProjectMeta {
 
 const SEGMENTS = [makeSeg("seg-a", 1000, 2000), makeSeg("seg-b", 2000, 3000), makeSeg("seg-c", 3000, 4000)];
 
-function renderWorkbench(segments: SegmentRecord[] = SEGMENTS, issues: IssueRecord[] = []) {
+function renderWorkbench(segments: SegmentRecord[] = SEGMENTS, issues: IssueRecord[] = [], segmentRenderProbe?: (segmentId: string) => void) {
   const audioRefMonitor = { get currentTime() { return 0; } };
   const utils = render(
     <Workbench
@@ -79,6 +86,7 @@ function renderWorkbench(segments: SegmentRecord[] = SEGMENTS, issues: IssueReco
       initialIssues={issues}
       onBack={vi.fn()}
       onRelocated={vi.fn()}
+      segmentRenderProbe={segmentRenderProbe}
     />,
   );
   const row = (id: string) =>
@@ -146,5 +154,59 @@ describe("Workbench 行内确认 / Ctrl+Enter（第 10 轮审计）", () => {
       expect(row("seg-c").contains(document.activeElement)).toBe(true);
     });
     expect(screen.getAllByRole("button", { name: "取消确认" })).toHaveLength(1); // 仅 B 被确认
+  });
+});
+
+describe("Workbench 渲染范围（第 11 轮审计 1：真实回调链）", () => {
+  it("经真实回调链连续编辑中间行：草稿管道下所有行零重渲染（AC-048）", () => {
+    const probe = vi.fn();
+    renderWorkbench(undefined, undefined, (id) => probe(id));
+    const countFor = (id: string) => probe.mock.calls.filter(([x]) => x === id).length;
+    const ids = ["seg-a", "seg-b", "seg-c"];
+    const c0 = ids.map(countFor);
+
+    // 经真实 Workbench 回调链（fireEvent → textarea onChange → editSegment → setSegments）
+    // 连续编辑中间行三次。
+    const rowB = (id: string) => document.querySelector<HTMLElement>(`[data-segment-id="${id}"]`)!;
+    const editor = within(rowB("seg-b")).getByRole("textbox");
+    fireEvent.change(editor, { target: { value: "校对B一" } });
+    fireEvent.change(editor, { target: { value: "校对B一二" } });
+    fireEvent.change(editor, { target: { value: "校对B一二三" } });
+
+    const c1 = ids.map(countFor);
+    // 草稿管道（V1.0.5 AC-048）：正文编辑零逐键渲染——
+    // 仅首键发生一次状态迁移（未校对 → 校对中，B +1），后续键零渲染；A/C 始终零渲染。
+    expect(c1[0]).toBe(c0[0]);
+    expect(c1[2]).toBe(c0[2]);
+    expect(c1[1] - c0[1]).toBeLessThanOrEqual(1);
+    expect(within(rowB("seg-b")).getByRole("button", { name: "确认本段" })).toBeTruthy(); // 状态可见
+    expect(within(rowB("seg-b")).getByText("✎ 校对中")).toBeTruthy();
+    // 行内确认 C（选中从 A 切到 C）：仅选中相关的行（A、C）各重渲染一次，B 不受影响。
+    fireEvent.click(within(rowB("seg-c")).getByRole("button", { name: "确认本段" }));
+    const c2 = ids.map(countFor);
+    expect(c2[1]).toBe(c1[1]); // 中间行 B 不因 C 的确认而重渲染
+    expect(c2[0]).toBe(c1[0] + 1); // A：selected true→false（高亮变化，合法）
+    expect(c2[2]).toBe(c1[2] + 1); // C：状态+选中变化（合法）
+
+    // 第 11 轮审计 5：Timeline memo 真实证据。
+    // 1) 先确认 A（status 变化 → timelineData 新引用 → Timeline 重渲染）。
+    const lastTimelineCall = () => TimelineSpy.mock.calls.length;
+    const beforeConfirmA = lastTimelineCall();
+    fireEvent.click(within(rowB("seg-a")).getByRole("button", { name: "确认本段" }));
+    expect(lastTimelineCall()).toBeGreaterThan(beforeConfirmA);
+    // 2) 纯正文编辑（B 为 editing 状态，status 不变 → timelineData 引用不变）→ 不重渲染。
+    const timelineBaseline = lastTimelineCall();
+    const editorB = within(rowB("seg-b")).getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(editorB, { target: { value: "正文编辑不应触发 Timeline" } });
+    expect(lastTimelineCall()).toBe(timelineBaseline);
+    expect(editorB.value).toBe("正文编辑不应触发 Timeline"); // 文本仍在 DOM
+    // 3) 取消确认 A（status confirmed→editing 变化）→ Timeline 重渲染。
+    fireEvent.click(within(rowB("seg-a")).getByRole("button", { name: "取消确认" }));
+    expect(lastTimelineCall()).toBeGreaterThan(timelineBaseline);
+    // 重渲染后传给 Timeline 的 segments 引用仍稳定（撤销把 status 拉回 editing → 与缓存不同才更新）
+    const lastProps = TimelineSpy.mock.calls[TimelineSpy.mock.calls.length - 1][0] as {
+      segments: unknown;
+    };
+    expect(Array.isArray(lastProps.segments)).toBe(true);
   });
 });

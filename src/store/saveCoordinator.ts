@@ -63,7 +63,10 @@ export class SaveCoordinator {
   /** 防抖调度；failed 状态不回退为 saving（失败持续可见，直到重试成功）。 */
   schedule(): void {
     if (this.timer !== null) clearTimeout(this.timer);
-    if (this._state.state !== "failed") this.setState({ state: "saving" });
+    // 已处于 saving 时不再重复发布相同状态（AC-048：逐键输入不重复通知）。
+    if (this._state.state !== "failed" && this._state.state !== "saving") {
+      this.setState({ state: "saving" });
+    }
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.flush();
@@ -89,7 +92,8 @@ export class SaveCoordinator {
       return;
     }
     this.flushing = true;
-    this.setState({ state: "saving" });
+    // 与 schedule 相同的去重：已处于 saving 时不重复发布相同状态。
+    if (this._state.state !== "saving") this.setState({ state: "saving" });
     const run: Promise<void> = (async () => {
       try {
         while (this.queue.size > 0) {

@@ -256,10 +256,31 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   border-radius: 6px;
   padding: 4px 8px;
 }
-.seg-corrected { width: 100%; min-height: 44px; }
+.seg-corrected {
+  width: 100%;
+  min-height: 44px;
+  max-height: 320px;
+  /* AC-048：高度自适应交给 CSS field-sizing（Chrome 123+），消除逐键 JS 强制布局三段式；
+     不支持的浏览器由最小高度兜底，行为不回退到逐键同步布局。 */
+  field-sizing: content;
+}
 .seg-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+/* AC-047：四个行内按钮统一可见高度与垂直盒模型——固定 CSS 高度 + 行高 1 + 垂直居中，
+   符号字形（⚑/⭯/⏸/▶）与 CJK 文字的行盒差异被消除；宽度按文案自适应。
+   打开菜单、按钮文案切换都不改变高度或字幕行高。 */
+/* 根因（第 11 轮审计）：.seg-actions 为 flex，直接子按钮默认 stretch 会等高，
+   但 ⚑ 按钮嵌在 .issue-trigger-wrap 内不参与拉伸 → 高度差。
+   用 display:contents 让包装器退出盒树，四个按钮成为同级 flex item；
+   再叠加固定高度 + 行高 1，保证任意缩放/文案/菜单状态下可见高度一致。 */
+.issue-trigger-wrap { display: contents; }
+.seg-actions button {
+  height: 30px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 /* 行内疑点类型选择层：紧邻触发按钮；白底浮层，不改变行高与滚动布局 */
-.issue-trigger-wrap { position: relative; display: inline-block; }
 .type-menu {
   /* position:fixed + portal 到 body：菜单完全不参与 .wb-list 滚动几何，
      不改变 scrollHeight/scrollTop；坐标由 menuPlacement 碰撞感知计算。 */

@@ -8,7 +8,8 @@ import { useCallback, useState } from "react";
 import type { ExportPreview } from "../core/exportSrt.js";
 
 interface Props {
-  preview: ExportPreview;
+  /** 打开对话框时才计算全量预览（V1.0.5 AC-048：不在输入路径上逐键重建）。 */
+  computePreview: () => ExportPreview;
   suggestedName: string;
   fsAccess: boolean;
   /** true = 导出时能用 isSameEntry 自动阻止写到源文件上。 */
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export function ExportDialog({
-  preview,
+  computePreview,
   suggestedName,
   fsAccess,
   sourceGuardReady,
@@ -26,6 +27,7 @@ export function ExportDialog({
   onClose,
 }: Props) {
   const [fileName, setFileName] = useState(suggestedName);
+  const [preview] = useState(computePreview); // 仅在打开时计算一次
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [ack, setAck] = useState(false);

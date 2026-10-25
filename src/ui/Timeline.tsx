@@ -1,14 +1,29 @@
 /**
- * 时间轴（canvas）：字幕段密度条 + 刻度 + 播放头 + 循环区。
- * 点击/拖动跳转；当前时间通过订阅 rAF 时钟重绘，不触发 React 渲染。
- * V0.1 不做全量波形解码（3.5 小时音频整段解码会占用数 GB 内存），见 README 已知限制。
+ * 时间轴（canvas）：字幕段密度条 + 刻度（静态层）与播放头 + 循环区（overlay）。
+ *
+ * - props.segments 是 Workbench 传入的稳定轻量数据（仅 id/start/end/status，
+ *   纯正文编辑时引用不变，React.memo 直接跳过本组件 render）；
+ * - 静态层仅在 id/start/end/status/时长/尺寸变化时重绘（sameTimelineData 精确失效）；
+ * - overlay 每帧廉价绘制；rAF 热路径不遍历段数据；
+ * - 点击/拖动跳转。
  */
-import { useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
+import { sameTimelineData, type TimelineSegLike } from "../core/selection.js";
 import type { LoopRegion } from "../audio/usePlayer.js";
-import type { SegmentRecord } from "../store/types.js";
+
+/** O(1) 几何键：时长/宽高/DPR 任一变化即不同（静态层失效判定，rAF 内零段遍历）。 */
+export function timelineGeometryKey(
+  durationMs: number,
+  clientWidth: number,
+  clientHeight: number,
+  dpr: number,
+): string {
+  return `${durationMs}|${clientWidth}|${clientHeight}|${dpr}`;
+}
 
 interface Props {
-  segments: SegmentRecord[];
+  /** 轻量时间轴数据（由 Workbench 保证引用稳定）。 */
+  segments: TimelineSegLike[];
   durationMs: number;
   loop: LoopRegion | null;
   onSeek: (ms: number) => void;
@@ -23,7 +38,13 @@ const STATUS_COLORS: Record<string, string> = {
   accepted_unclear: "#9333ea",
 };
 
-export function Timeline({ segments, durationMs, loop, onSeek, subscribeCurrentMs }: Props) {
+export const Timeline = memo(function Timeline({
+  segments,
+  durationMs,
+  loop,
+  onSeek,
+  subscribeCurrentMs,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const segmentsRef = useRef(segments);
   const durationRef = useRef(durationMs);
@@ -38,6 +59,66 @@ export function Timeline({ segments, durationMs, loop, onSeek, subscribeCurrentM
       currentRef.current = ms;
     });
   }, [subscribeCurrentMs]);
+
+  // 静态层失效：仅由 props.segments 引用变化触发（引用稳定由 Workbench 保证），
+  // 且用 sameTimelineData 双重确认内容确实变化。
+  const staticDirtyRef = useRef(true);
+  const prevDataRef = useRef<TimelineSegLike[]>(segments);
+  if (prevDataRef.current !== segments && !sameTimelineData(prevDataRef.current, segments)) {
+    staticDirtyRef.current = true; // id/start/end/status 变化 → 重绘
+  }
+  prevDataRef.current = segments;
+
+  const staticBitmapRef = useRef<HTMLCanvasElement | null>(null);
+  const geometryKeyRef = useRef("");
+
+  const drawStatic = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const off = staticBitmapRef.current ?? document.createElement("canvas");
+    if (off.width !== Math.round(w * dpr) || off.height !== Math.round(h * dpr)) {
+      off.width = Math.round(w * dpr);
+      off.height = Math.round(h * dpr);
+    }
+    const octx = off.getContext("2d");
+    if (!octx) return;
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    octx.clearRect(0, 0, w, h);
+    octx.fillStyle = "#ffffff";
+    octx.fillRect(0, 0, w, h);
+
+    const d = durationRef.current;
+    const steps = [60_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000];
+    const step = steps.find((x) => (x / d) * w >= 70) ?? 3_600_000;
+    octx.font = "10px ui-monospace, monospace";
+    octx.fillStyle = "#64748b";
+    octx.strokeStyle = "#dbe2ea";
+    for (let t = 0; t <= d; t += step) {
+      const x = (t / d) * w;
+      octx.beginPath();
+      octx.moveTo(x, h - 14);
+      octx.lineTo(x, h);
+      octx.stroke();
+      const mm = Math.floor(t / 60_000);
+      const label = `${String(Math.floor(mm / 60)).padStart(2, "0")}:${String(mm % 60).padStart(2, "0")}`;
+      octx.fillText(label, x + 2, h - 3);
+    }
+
+    const y0 = 6;
+    const y1 = h - 18;
+    for (const seg of segmentsRef.current) {
+      const x0 = Math.max(0, (seg.startMs / d) * w);
+      const x1 = Math.min(w, (seg.endMs / d) * w);
+      if (x1 <= x0) continue;
+      octx.fillStyle = STATUS_COLORS[seg.status] ?? "#94a3b8";
+      octx.fillRect(x0, y0, Math.max(1, x1 - x0), y1 - y0);
+    }
+    staticBitmapRef.current = off;
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -57,42 +138,22 @@ export function Timeline({ segments, durationMs, loop, onSeek, subscribeCurrentM
         }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, w, h);
 
-        // 刻度：选择使标签间距 >= 70px 的时间步长。
-        const steps = [60_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000];
-        const step = steps.find((s) => (s / d) * w >= 70) ?? 3_600_000;
-        ctx.font = "10px ui-monospace, monospace";
-        ctx.fillStyle = "#64748b";
-        ctx.strokeStyle = "#dbe2ea";
-        for (let t = 0; t <= d; t += step) {
-          const x = (t / d) * w;
-          ctx.beginPath();
-          ctx.moveTo(x, h - 14);
-          ctx.lineTo(x, h);
-          ctx.stroke();
-          const mm = Math.floor(t / 60_000);
-          const label = `${String(Math.floor(mm / 60)).padStart(2, "0")}:${String(mm % 60).padStart(2, "0")}`;
-          ctx.fillText(label, x + 2, h - 3);
+        // 几何键 O(1)：时长/宽高/DPR 任一变化置脏静态层（不遍历段数组）。
+        const geoKey = timelineGeometryKey(d, w, h, dpr);
+        if (geoKey !== geometryKeyRef.current) {
+          geometryKeyRef.current = geoKey;
+          staticDirtyRef.current = true;
+        }
+        if (staticDirtyRef.current) {
+          drawStatic();
+          staticDirtyRef.current = false;
+        }
+        if (staticBitmapRef.current) {
+          ctx.drawImage(staticBitmapRef.current, 0, 0, w, h);
         }
 
-        // 字幕段块。
-        const y0 = 6;
-        const y1 = h - 18;
-        const segs = segmentsRef.current;
-        if (segs.length > 0 && segs[segs.length - 1].endMs > d) {
-          // 字幕超出音频时按字幕范围兜底显示（越界属于质量问题，工作台会提示）。
-        }
-        for (const s of segs) {
-          const x0 = Math.max(0, (s.startMs / d) * w);
-          const x1 = Math.min(w, (s.endMs / d) * w);
-          if (x1 <= x0) continue;
-          ctx.fillStyle = STATUS_COLORS[s.status] ?? "#475569";
-          ctx.fillRect(x0, y0, Math.max(1, x1 - x0), y1 - y0);
-        }
-
-        // 循环区。
+        // overlay：循环区 + 播放头（每帧廉价绘制，不遍历段数据）。
         const lp = loopRef.current;
         if (lp) {
           const lx0 = (lp.startMs / d) * w;
@@ -107,8 +168,6 @@ export function Timeline({ segments, durationMs, loop, onSeek, subscribeCurrentM
           ctx.lineTo(lx1, h);
           ctx.stroke();
         }
-
-        // 播放头。
         const cx = (currentRef.current / d) * w;
         ctx.strokeStyle = "#0f172a";
         ctx.lineWidth = 1.5;
@@ -118,6 +177,7 @@ export function Timeline({ segments, durationMs, loop, onSeek, subscribeCurrentM
         ctx.stroke();
         ctx.lineWidth = 1;
       }
+
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -156,4 +216,4 @@ export function Timeline({ segments, durationMs, loop, onSeek, subscribeCurrentM
       />
     </div>
   );
-}
+});

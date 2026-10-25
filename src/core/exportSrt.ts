@@ -14,16 +14,20 @@ export interface ExportPreview {
   emptyTextCount: number;
 }
 
-/** 由校对层构建导出 cue：使用 correctedText（初始等于原始文本）。 */
+/**
+ * 由校对层构建导出 cue：优先使用未落盘草稿（V1.0.5 草稿管道），
+ * 其次 correctedText（初始等于原始文本）。保证「先编辑后导出」内容新鲜、无陈旧导出。
+ */
 export function buildExportPreview(
   segments: SegmentRecord[],
   issues: IssueRecord[],
+  drafts?: ReadonlyMap<string, string>,
 ): ExportPreview {
   const cues: SrtCue[] = segments.map((s) => ({
     seq: s.cueNo,
     startMs: s.startMs,
     endMs: s.endMs,
-    text: s.correctedText,
+    text: drafts?.get(s.segmentId) ?? s.correctedText,
   }));
   const open = issues.filter((i) => i.status === "open");
   return {

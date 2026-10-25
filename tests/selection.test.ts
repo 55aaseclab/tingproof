@@ -13,6 +13,9 @@ import {
   planConfirm,
   planLoopToggle,
   planUnconfirm,
+  reuseTimelineData,
+  sameSortedOrderShape,
+  sameTimelineData,
   segmentIdForRange,
   type SegmentLike,
 } from "../src/core/selection.js";
@@ -127,5 +130,104 @@ describe("planUnconfirm（审计/PRD V1.0.4 行内确认可撤销）", () => {
   it("有未解决疑点 → questioned；无 → editing", () => {
     expect(planUnconfirm(true)).toBe("questioned");
     expect(planUnconfirm(false)).toBe("editing");
+  });
+});
+
+
+describe("排序/时间轴精确比较（V1.0.5 AC-048 + 第 10 轮审计 2/3）", () => {
+  it("sameSortedOrderShape：正文/状态变化不影响；时间变化、ID 替换、数量变化、重叠同时间段都判不同", () => {
+    const base: SegmentLike[] = [seg("a", 0, 100), seg("b", 200, 300)];
+    const byId = (list: SegmentLike[]) => new Map(list.map((x) => [x.segmentId, x]));
+    // 仅文本/状态变化 → 形状相同（跳过重排）
+    expect(
+      sameSortedOrderShape(base, byId([seg("a", 0, 100, { correctedText: "改了", status: "confirmed" }), seg("b", 200, 300)])),
+    ).toBe(true);
+    // 同和边界变化：0..100 改成 10..90（start+end 不变）→ 必须判不同
+    expect(sameSortedOrderShape(base, byId([seg("a", 10, 90), seg("b", 200, 300)]))).toBe(false);
+    // ID 替换（时间段完全相同）→ 必须判不同
+    expect(sameSortedOrderShape(base, byId([seg("x", 0, 100), seg("b", 200, 300)]))).toBe(false);
+    // 重叠同时间段、不同 ID → 必须判不同
+    expect(sameSortedOrderShape(base, byId([seg("a", 0, 100), seg("z", 0, 100)]))).toBe(false);
+    // 数量变化 → false
+    expect(sameSortedOrderShape(base, byId([...base, seg("c", 400, 500)]))).toBe(false);
+  });
+
+  it("sameSortedOrderShape：不假设输入顺序与缓存排序顺序相同（按 ID 查表比较）", () => {
+    const cachedSorted: SegmentLike[] = [seg("a", 0, 100), seg("b", 200, 300)];
+    const incomingUnsorted = [seg("b", 200, 300, { correctedText: "编辑过" }), seg("a", 0, 100)];
+    expect(sameSortedOrderShape(cachedSorted, new Map(incomingUnsorted.map((x) => [x.segmentId, x])))).toBe(true);
+    const timeChanged = [seg("b", 200, 300), seg("a", 10, 90)];
+    expect(sameSortedOrderShape(cachedSorted, new Map(timeChanged.map((x) => [x.segmentId, x])))).toBe(false);
+  });
+
+  it("sameTimelineData：正文变化不失效；id/start/end/status/数量变化必失效（审计项 3）", () => {
+    const data = [{ segmentId: "a", startMs: 0, endMs: 100, status: "editing" }];
+    expect(sameTimelineData(data, [{ segmentId: "a", startMs: 0, endMs: 100, status: "editing" }])).toBe(true);
+    expect(sameTimelineData(data, [{ segmentId: "a", startMs: 0, endMs: 100, status: "confirmed" }])).toBe(false);
+    expect(sameTimelineData(data, [{ segmentId: "a", startMs: 10, endMs: 90, status: "editing" }])).toBe(false);
+    expect(sameTimelineData(data, [{ segmentId: "z", startMs: 0, endMs: 100, status: "editing" }])).toBe(false);
+    expect(sameTimelineData(data, [])).toBe(false);
+  });
+});
+
+
+describe("reuseTimelineData（第 11 轮审计 3）", () => {
+  const records = [
+    { segmentId: "a", startMs: 0, endMs: 100, status: "editing", correctedText: "v1" },
+    { segmentId: "b", startMs: 200, endMs: 300, status: "unreviewed", correctedText: "v1" },
+  ];
+
+  it("纯正文变化：reused=true 且严格返回同一引用（不每键新建 1,676 个对象）", () => {
+    const { reused, value } = reuseTimelineData(null, records);
+    expect(reused).toBe(false);
+    const again = reuseTimelineData(value, [
+      { segmentId: "a", startMs: 0, endMs: 100, status: "editing", correctedText: "v2" },
+      { segmentId: "b", startMs: 200, endMs: 300, status: "unreviewed", correctedText: "v2" },
+    ]);
+    expect(again.reused).toBe(true);
+    expect(again.value).toBe(value); // 严格同一引用 → React.memo 跳过
+  });
+
+  it("状态/时间变化：返回新引用（静态层必须重绘）", () => {
+    const { value } = reuseTimelineData(null, records);
+    const statusChanged = reuseTimelineData(value, [
+      { segmentId: "a", startMs: 0, endMs: 100, status: "confirmed" },
+      { segmentId: "b", startMs: 200, endMs: 300, status: "unreviewed" },
+    ]);
+    expect(statusChanged.reused).toBe(false);
+    expect(statusChanged.value).not.toBe(value);
+    const timeChanged = reuseTimelineData(value, [
+      { segmentId: "a", startMs: 10, endMs: 90, status: "editing" },
+      { segmentId: "b", startMs: 200, endMs: 300, status: "unreviewed" },
+    ]);
+    expect(timeChanged.reused).toBe(false);
+    expect(timeChanged.value[0]).toEqual({ segmentId: "a", startMs: 10, endMs: 90, status: "editing" });
+  });
+
+  it("缓存为空（首帧）：投影新数组", () => {
+    const first = reuseTimelineData(null, records);
+    expect(first.reused).toBe(false);
+    expect(first.value).toHaveLength(2);
+  });
+});
+
+
+describe("planConfirm 草稿覆盖（第 13 轮审计 P0）", () => {
+  it("原非空段被草稿清空 → 确认被阻止（不得保存 confirmed + 空文本）", () => {
+    const sorted = [seg("a", 0, 100, { correctedText: "有内容" })];
+    const plan = planConfirm(sorted, "a", "");
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reason).toContain("文本为空");
+  });
+
+  it("原空段输入非空草稿 → 确认放行（不误阻止）", () => {
+    const sorted = [seg("e", 0, 100, { correctedText: "" })];
+    const plan = planConfirm(sorted, "e", "新内容");
+    expect(plan).toEqual({ ok: true, confirmedId: "e", nextId: null });
+  });
+
+  it("无草稿时行为不变（correctedText 仍是判定依据）", () => {
+    expect(planConfirm([seg("a", 0, 100, { correctedText: "" })], "a").ok).toBe(false);
+    expect(planConfirm([seg("a", 0, 100, { correctedText: "ok" })], "a").ok).toBe(true);
   });
 });

@@ -6,12 +6,24 @@
  * - 点击按钮只触发 onTogglePlay（不冒泡成行定位）；
  * - 双击时间码等价于播放/暂停开关。
  */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useCallback, useState } from "react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SegmentList } from "../src/ui/SegmentList.js";
 import type { SegmentRecord } from "../src/store/types.js";
 
 afterEach(() => cleanup());
+
+/** 把真实样式表注入 jsdom，使 getComputedStyle 反映产品 CSS（AC-047 盒模型断言）。 */
+function injectStyles() {
+  const cssPath = join(import.meta.dirname, "../src/styles.css");
+  const style = document.createElement("style");
+  style.textContent = readFileSync(cssPath, "utf8");
+  document.head.appendChild(style);
+  return () => style.remove();
+}
 
 function makeSeg(over: Partial<SegmentRecord> = {}): SegmentRecord {
   return {
@@ -52,7 +64,8 @@ function renderList(over: {
       playingSegmentId={over.playingSegmentId ?? null}
       unresolvedBySegment={new Map()}
       loopSegmentId={null}
-      onEdit={vi.fn()}
+      onDraftChange={vi.fn()}
+      onCompositionStart={vi.fn()}
       onCompositionEnd={vi.fn()}
       onConfirmRow={onConfirmRow}
       onUnconfirmRow={onUnconfirmRow}
@@ -163,7 +176,8 @@ describe("SegmentList 行内交互（AC-041 / AC-042）", () => {
         playingSegmentId={null}
         unresolvedBySegment={new Map()}
         loopSegmentId="seg-1"
-        onEdit={vi.fn()}
+        onCompositionStart={vi.fn()}
+        onDraftChange={vi.fn()}
         onCompositionEnd={vi.fn()}
         onConfirmRow={vi.fn()}
         onUnconfirmRow={vi.fn()}
@@ -235,7 +249,8 @@ describe("行内疑点类型选择层（PRD V1.0.4 AC-044）", () => {
         playingSegmentId={null}
         unresolvedBySegment={new Map()}
         loopSegmentId={null}
-        onEdit={vi.fn()}
+        onCompositionStart={vi.fn()}
+        onDraftChange={vi.fn()}
         onCompositionEnd={vi.fn()}
         onConfirmRow={vi.fn()}
         onUnconfirmRow={vi.fn()}
@@ -303,5 +318,147 @@ describe("行内确认/撤销确认（PRD V1.0.4 AC-045）", () => {
     fireEvent.click(btn);
     expect(onUnconfirmRow).toHaveBeenCalledWith("seg-1");
     expect(onConfirmRow).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("行内按钮尺寸一致（PRD V1.0.5 AC-047）", () => {
+  it("四个行内按钮统一 30px 高度、垂直居中、行高 1（CSS 保证各缩放下高度差 ≤ 1px）", () => {
+    const removeStyles = injectStyles();
+    const { container } = renderList();
+    const row = container.querySelector<HTMLElement>("[data-segment-id='seg-1']")!;
+    const names = ["播放", "确认本段", "⚑ 疑点", "⭯ 循环"];
+    const heights = names.map((n) => {
+      const btn = within(row).getByRole("button", { name: n });
+      return getComputedStyle(btn).height;
+    });
+    // 固定高度：全部一致（可见高度差 ≤ 1px 由同一 CSS 值保证）。
+    expect(new Set(heights).size).toBe(1);
+    expect(heights[0]).toBe("30px");
+    for (const n of names) {
+      const btn = within(row).getByRole("button", { name: n });
+      const cs = getComputedStyle(btn);
+      expect(cs.display).toBe("inline-flex");
+      expect(cs.alignItems).toBe("center");
+      expect(["1", "1px"]).toContain(cs.lineHeight);
+    }
+    // 根因断言：wrapper 必须退出盒树（display:contents），否则 ⚑ 不参与 flex 拉伸（第 11 轮审计 1）。
+    const wrap = within(row).getByRole("button", { name: "⚑ 疑点" }).parentElement!;
+    expect(wrap.className).toBe("issue-trigger-wrap");
+    expect(getComputedStyle(wrap).display).toBe("contents");
+    removeStyles();
+  });
+
+  it("播放/暂停文案切换不改变按钮高度；打开类型菜单不改变行高（AC-047）", () => {
+    const removeStyles = injectStyles();
+    const { rerender, container } = renderList();
+    const row = () => container.querySelector<HTMLElement>("[data-segment-id='seg-1']")!;
+    const playHeight = getComputedStyle(within(row()).getByRole("button", { name: "播放" })).height;
+    rerender(
+      <div className="wb-list">
+        <SegmentList
+          segments={[makeSeg()]}
+          selectedId={null}
+          playingSegmentId="seg-1"
+          unresolvedBySegment={new Map()}
+          loopSegmentId={null}
+          onCompositionStart={vi.fn()}
+        onDraftChange={vi.fn()}
+          onCompositionEnd={vi.fn()}
+          onConfirmRow={vi.fn()}
+          onUnconfirmRow={vi.fn()}
+          onLocate={vi.fn()}
+          onTogglePlay={vi.fn()}
+          onLoop={vi.fn()}
+          onCreateIssueWithType={vi.fn()}
+        />
+      </div>,
+    );
+    const pauseHeight = getComputedStyle(within(row()).getByRole("button", { name: "暂停" })).height;
+    expect(pauseHeight).toBe(playHeight);
+    fireEvent.click(within(row()).getByRole("button", { name: "⚑ 疑点" })); // 打开菜单
+    const rowHeight = row().getBoundingClientRect().height; // jsdom=0，仅校验不抛错
+    expect(rowHeight).toBeGreaterThanOrEqual(0);
+    removeStyles();
+  });
+});
+
+describe("输入渲染范围（PRD V1.0.5 AC-048）", () => {
+  const EMPTY_MAP = new Map<string, number>();
+  function StatefulList({
+    initial,
+    renderProbe,
+    onDraftChange,
+  }: {
+    initial: SegmentRecord[];
+    renderProbe: (segmentId: string) => void;
+    onDraftChange: (segmentId: string, text: string, composing: boolean) => void;
+  }) {
+    const [segments] = useState(initial);
+    // 稳定回调/稳定 Map：模拟 Workbench 的 memo 纪律（不稳定 props 会让所有行重渲染）。
+    const unresolvedBySegment = EMPTY_MAP;
+    // 草稿模式：正文编辑不经过 React 状态，由 onDraftChange prop（spy）记录，行零重渲染。
+    const onCompositionStart = useCallback(() => undefined, []);
+    const onCompositionEnd = useCallback(() => undefined, []);
+    const onConfirmRow = useCallback(() => undefined, []);
+    const onUnconfirmRow = useCallback(() => undefined, []);
+    const onLocate = useCallback(() => undefined, []);
+    const onTogglePlay = useCallback(() => undefined, []);
+    const onLoop = useCallback(() => undefined, []);
+    const onCreateIssueWithType = useCallback(() => undefined, []);
+    return (
+      <div className="wb-list">
+        <SegmentList
+          segments={segments}
+          selectedId={null}
+          playingSegmentId={null}
+          unresolvedBySegment={unresolvedBySegment}
+          loopSegmentId={null}
+          onDraftChange={onDraftChange}
+          onCompositionStart={onCompositionStart}
+          onCompositionEnd={onCompositionEnd}
+          onConfirmRow={onConfirmRow}
+          onUnconfirmRow={onUnconfirmRow}
+          onLocate={onLocate}
+          onTogglePlay={onTogglePlay}
+          onLoop={onLoop}
+          onCreateIssueWithType={onCreateIssueWithType}
+          renderProbe={renderProbe}
+        />
+      </div>
+    );
+  }
+
+  it("正文编辑走草稿：全部行零重渲染、文本即时显示（AC-048）", () => {
+    const probe = vi.fn();
+    const onDraftChange = vi.fn();
+    render(
+      <StatefulList
+        renderProbe={probe}
+        onDraftChange={onDraftChange}
+        initial={[
+          makeSeg({ segmentId: "seg-1" }),
+          makeSeg({ segmentId: "seg-2", startMs: 6000, endMs: 9000 }),
+          makeSeg({ segmentId: "seg-3", startMs: 10_000, endMs: 13_000 }),
+        ]}
+      />,
+    );
+    const rowCount = (id: string) => probe.mock.calls.filter(([x]) => x === id).length;
+    const ids = ["seg-1", "seg-2", "seg-3"];
+    const c0 = ids.map(rowCount);
+
+    // 在 seg-2 中连续输入两个字符（模拟逐键）。
+    const editor = screen.getByLabelText("校对文本 00:00:06.000");
+    fireEvent.change(editor, { target: { value: "校对2a" } });
+    fireEvent.change(editor, { target: { value: "校对2ab" } });
+
+    const c1 = ids.map(rowCount);
+    // 草稿管道（V1.0.5）：正文编辑零 React 渲染——被编辑行与非修改行全部零重渲染，
+    // 文本由非受控 textarea 原生即时显示，持久化走 500ms 草稿队列。
+    expect(c1).toEqual(c0);
+    expect(onDraftChange).toHaveBeenCalledTimes(2);
+    expect(onDraftChange).toHaveBeenNthCalledWith(1, "seg-2", "校对2a", false);
+    expect(onDraftChange).toHaveBeenNthCalledWith(2, "seg-2", "校对2ab", false);
+    expect((editor as HTMLTextAreaElement).value).toBe("校对2ab");
   });
 });

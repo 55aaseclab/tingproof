@@ -55,10 +55,13 @@ export type ConfirmPlan =
 export function planConfirm(
   sortedSegments: SegmentLike[],
   segmentId: string,
+  /** 目标段的最新草稿（存在时优先于 correctedText，包括空字符串——第 13 轮审计 P0）。 */
+  draftText?: string,
 ): ConfirmPlan {
   const seg = sortedSegments.find((s) => s.segmentId === segmentId);
   if (!seg) return { ok: false, reason: "未找到该字幕段，请刷新后重试。" };
-  if (seg.correctedText.trim() === "") {
+  const effectiveText = draftText !== undefined ? draftText : seg.correctedText;
+  if (effectiveText.trim() === "") {
     return {
       ok: false,
       reason: "语音段文本为空，不能确认。若该段不是讲话内容，请标记疑点并说明。",
@@ -100,4 +103,70 @@ export function planLoopToggle(
  */
 export function planUnconfirm(hasOpenIssue: boolean): "questioned" | "editing" {
   return hasOpenIssue ? "questioned" : "editing";
+}
+
+export interface TimelineSegLike {
+  segmentId: string;
+  startMs: number;
+  endMs: number;
+  status: string;
+}
+
+/**
+ * 排序缓存形状比较（第 10 轮审计 C）：按 segmentId 对「缓存已排序顺序」逐项精确比较
+ * start/end——不假设原始输入顺序与缓存排序顺序相同；ID 替换、时间变化、数量变化都判不同。
+ */
+export function sameSortedOrderShape(
+  cachedSorted: SegmentLike[],
+  incomingById: Map<string, SegmentLike>,
+): boolean {
+  if (incomingById.size !== cachedSorted.length) return false;
+  for (const cachedSeg of cachedSorted) {
+    const next = incomingById.get(cachedSeg.segmentId);
+    if (!next) return false; // ID 替换
+    if (next.startMs !== cachedSeg.startMs || next.endMs !== cachedSeg.endMs) return false;
+  }
+  return true;
+}
+
+/**
+ * 时间轴数据比较（第 10 轮审计 item 3）：id/start/end/status 任一变化即不同；
+ * 纯正文（correctedText）变化必须判定相同——文本变化不重绘时间轴静态层。
+ */
+export function sameTimelineData(a: TimelineSegLike[], b: TimelineSegLike[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].segmentId !== b[i].segmentId ||
+      a[i].startMs !== b[i].startMs ||
+      a[i].endMs !== b[i].endMs ||
+      a[i].status !== b[i].status
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * 时间轴数据复用/投影 helper（第 11 轮审计 3）：
+ * 纯正文（id/start/end/status 全同）变化 → reused=true 且 value 为**同一引用**；
+ * 状态/时间/数量/ID 变化 → 新数组。调用方（Workbench）据此让 React.memo 真正跳过。
+ */
+export function reuseTimelineData<T extends { segmentId: string; startMs: number; endMs: number; status: string }>(
+  cached: TimelineSegLike[] | null,
+  segments: T[],
+): { reused: boolean; value: TimelineSegLike[] } {
+  if (cached && sameTimelineData(cached, segments)) {
+    return { reused: true, value: cached };
+  }
+  return {
+    reused: false,
+    value: segments.map((s) => ({
+      segmentId: s.segmentId,
+      startMs: s.startMs,
+      endMs: s.endMs,
+      status: s.status,
+    })),
+  };
 }

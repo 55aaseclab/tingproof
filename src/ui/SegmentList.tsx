@@ -25,7 +25,9 @@ interface Props {
   playingSegmentId: string | null;
   unresolvedBySegment: Map<string, number>;
   loopSegmentId: string | null;
-  onEdit: (segmentId: string, text: string, composing: boolean) => void;
+  /** 正文草稿变更（组合中 composing=true；持久化策略由 Workbench 决定）。 */
+  onDraftChange: (segmentId: string, text: string, composing: boolean) => void;
+  onCompositionStart: (segmentId: string) => void;
   onCompositionEnd: (segmentId: string) => void;
   /** 行内确认：永远作用于被点击的 segmentId。 */
   onConfirmRow: (segmentId: string) => void;
@@ -38,6 +40,8 @@ interface Props {
   onLoop: (segmentId: string) => void;
   /** 行内类型选择层选定后创建：type 为用户所选值。 */
   onCreateIssueWithType: (segmentId: string, type: IssueType) => void;
+  /** 诊断/测试探针（可选）：每行每次提交后回调；生产不传即零开销。 */
+  renderProbe?: (segmentId: string) => void;
 }
 
 interface RowProps {
@@ -47,7 +51,8 @@ interface RowProps {
   looping: boolean;
   menuOpen: boolean;
   unresolvedCount: number;
-  onEdit: Props["onEdit"];
+  onDraftChange: Props["onDraftChange"];
+  onCompositionStart: Props["onCompositionStart"];
   onCompositionEnd: Props["onCompositionEnd"];
   onToggleMenu: (segmentId: string) => void;
   onCloseMenu: () => void;
@@ -57,37 +62,55 @@ interface RowProps {
   onTogglePlay: Props["onTogglePlay"];
   onLoop: Props["onLoop"];
   onCreateIssueWithType: Props["onCreateIssueWithType"];
+  renderProbe: Props["renderProbe"];
 }
 
+/**
+ * 非受控校对文本框（V1.0.5 AC-048）：
+ * - 输入即原生显示：打字期间零 React 重渲染、零强制布局（高度交给 CSS field-sizing）；
+ * - 文本经 onDraftChange 进入 Workbench 草稿管道（500ms 持久化，安全语义不变）；
+ * - 仅当持久层文本（externalText）与本地草稿不同步时（如重新定位/重开项目）才回写 DOM。
+ */
 function AutoTextarea({
-  value,
-  onChange,
+  initialText,
+  externalText,
+  onDraftChange,
+  onCompositionStart,
   onCompositionEnd,
   onFocus,
   ariaLabel,
 }: {
-  value: string;
-  onChange: (v: string, composing: boolean) => void;
+  initialText: string;
+  externalText: string;
+  onDraftChange: (v: string, composing: boolean) => void;
+  onCompositionStart: () => void;
   onCompositionEnd: () => void;
   onFocus: () => void;
   ariaLabel: string;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
-  const resize = useCallback(() => {
+  const lastKnownRef = useRef(initialText);
+  useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, []);
-  useEffect(resize, [value, resize]);
+    if (externalText !== lastKnownRef.current) {
+      el.value = externalText;
+      lastKnownRef.current = externalText;
+    }
+  }, [externalText]);
   return (
     <textarea
       ref={ref}
       className="seg-corrected"
-      value={value}
+      defaultValue={initialText}
       aria-label={ariaLabel}
       onFocus={onFocus}
-      onChange={(e) => onChange(e.target.value, (e.nativeEvent as InputEvent).isComposing ?? false)}
+      onChange={(e) => {
+        const v = e.target.value;
+        lastKnownRef.current = v;
+        onDraftChange(v, (e.nativeEvent as InputEvent).isComposing ?? false);
+      }}
+      onCompositionStart={() => onCompositionStart()}
       onCompositionEnd={() => onCompositionEnd()}
     />
   );
@@ -100,7 +123,8 @@ const SegmentRow = memo(function SegmentRow({
   looping,
   menuOpen,
   unresolvedCount,
-  onEdit,
+  onDraftChange,
+  onCompositionStart,
   onCompositionEnd,
   onToggleMenu,
   onCloseMenu,
@@ -110,9 +134,13 @@ const SegmentRow = memo(function SegmentRow({
   onTogglePlay,
   onLoop,
   onCreateIssueWithType,
+  renderProbe,
 }: RowProps) {
   const isConfirmed = seg.status === "confirmed";
   const issueTriggerRef = useRef<HTMLButtonElement | null>(null);
+  renderProbe?.(seg.segmentId);
+  // 渲染探针（可选）：仅在传入时于渲染体调用（第 11 轮审计 4）——
+  // 生产不传 → 不注册任何 effect、零开销；StrictMode 双调用由测试基线吸收。
 
   // 点击行内非操作区域（按钮/文本框/时间码/类型菜单之外）= 定位，不播放。
   const locateOnPointer = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -156,10 +184,12 @@ const SegmentRow = memo(function SegmentRow({
         {seg.originalText}
       </div>
       <AutoTextarea
-        value={seg.correctedText}
+        initialText={seg.correctedText}
+        externalText={seg.correctedText}
         ariaLabel={`校对文本 ${formatDisplay(seg.startMs)}`}
         onFocus={() => onLocate(seg.segmentId)}
-        onChange={(v, composing) => onEdit(seg.segmentId, v, composing)}
+        onDraftChange={(v, composing) => onDraftChange(seg.segmentId, v, composing)}
+        onCompositionStart={() => onCompositionStart(seg.segmentId)}
         onCompositionEnd={() => onCompositionEnd(seg.segmentId)}
       />
       <div className="seg-actions">
@@ -222,7 +252,8 @@ export function SegmentList({
   playingSegmentId,
   unresolvedBySegment,
   loopSegmentId,
-  onEdit,
+  onDraftChange,
+  onCompositionStart,
   onCompositionEnd,
   onConfirmRow,
   onUnconfirmRow,
@@ -230,9 +261,13 @@ export function SegmentList({
   onTogglePlay,
   onLoop,
   onCreateIssueWithType,
+  renderProbe,
 }: Props) {
   // 列表级单例：同一时间最多一个类型选择层展开。
   const [menuForId, setMenuForId] = useState<string | null>(null);
+  // 稳定回调：避免任何列表级状态变化让未修改行失去 memo 跳过能力（AC-048）。
+  const toggleMenu = useCallback((id: string) => setMenuForId((prev) => (prev === id ? null : id)), []);
+  const closeMenu = useCallback(() => setMenuForId(null), []);
   return (
     <div role="list" aria-label="字幕段列表">
       {segments.map((seg) => (
@@ -244,16 +279,18 @@ export function SegmentList({
           looping={seg.segmentId === loopSegmentId}
           menuOpen={menuForId === seg.segmentId}
           unresolvedCount={unresolvedBySegment.get(seg.segmentId) ?? 0}
-          onEdit={onEdit}
+          onDraftChange={onDraftChange}
+          onCompositionStart={onCompositionStart}
           onCompositionEnd={onCompositionEnd}
-          onToggleMenu={(id) => setMenuForId((prev) => (prev === id ? null : id))}
-          onCloseMenu={() => setMenuForId(null)}
+          onToggleMenu={toggleMenu}
+          onCloseMenu={closeMenu}
           onConfirmRow={onConfirmRow}
           onUnconfirmRow={onUnconfirmRow}
           onLocate={onLocate}
           onTogglePlay={onTogglePlay}
           onLoop={onLoop}
           onCreateIssueWithType={onCreateIssueWithType}
+          renderProbe={renderProbe}
         />
       ))}
     </div>

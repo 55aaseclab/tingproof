@@ -181,6 +181,32 @@ describe("createProject + 重开后恢复", () => {
     expect(await getProjectIssues("tp-idem")).toEqual(beforeIssues);
   });
 
+  it("连续编辑经 SaveCoordinator 最终持久化：标签去重后只写最终值（V1.0.5 AC-048）", async () => {
+    const { SaveCoordinator } = await import("../src/store/saveCoordinator.js");
+    await createProject(makeInput("tp-typed"));
+    const segs = await getProjectSegments("tp-typed");
+    const id = segs[0].segmentId;
+
+    const coordinator = new SaveCoordinator(0);
+    const typeText = (text: string) => {
+      // 模拟 Workbench.editSegment：本地状态 + 入队（同标签去重）。
+      coordinator.enqueue(`segment:${id}`, async () => {
+        const current = (await getProjectSegments("tp-typed")).find((x) => x.segmentId === id);
+        if (!current) return;
+        await updateSegment(id, { correctedText: text, status: "editing" });
+      });
+      coordinator.schedule();
+    };
+    typeText("第");
+    typeText("第一");
+    typeText("第一稿");
+    await coordinator.flush();
+    resetDbForTests(); // 模拟重启
+    const after = await getProjectSegments("tp-typed");
+    expect(after[0].correctedText).toBe("第一稿"); // 最终值完整落盘，刷新不丢字
+    expect(after[0].status).toBe("editing");
+  });
+
   it("repo 不再导出 upsertSegment（原始层唯一写入路径是 createProject；审计项 6）", async () => {
     const repoModule = await import("../src/store/repo.js");
     expect((repoModule as Record<string, unknown>)["upsertSegment"]).toBeUndefined();
