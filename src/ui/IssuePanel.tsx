@@ -41,14 +41,9 @@ export function IssuePanel({
   const [formSeverity, setFormSeverity] = useState<IssueSeverity>("blocking");
   const [formNote, setFormNote] = useState("");
 
-  /**
-   * 打开新建疑点表单（PRD V1.0.3）：
-   * 疑点类型必须重置为默认“听不清”，不得沿用上一次保存或取消前选择的专名、数字等类型；
-   * 表单打开后用户仍可改选。
-   */
+  /** 打开右侧完整创建表单：沿用上一次选择（V1.0.4 撤销 V1.0.3 的强制类型重置）。 */
   const openIssueForm = useCallback(() => {
     if (!activeId) return;
-    setFormType("unclear");
     setFormFor(activeId);
   }, [activeId]);
 

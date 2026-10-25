@@ -43,7 +43,7 @@ export function KeymapBar({ keymap, onClose }: { keymap: KeymapApi; onClose: () 
             <td>
               <span className="kbd">Ctrl</span>+<span className="kbd">Enter</span>
             </td>
-            <td className="hint">保存、确认、跳到下一未校对段</td>
+            <td className="hint">保存并确认当前段，定位下一未校对段段首（不自动播放）</td>
           </tr>
           <tr>
             <th>循环当前段</th>

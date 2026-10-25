@@ -212,8 +212,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .seg-row {
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
+  /* 不使用 content-visibility/contain-intrinsic-size：未渲染行用估算高度会改变总高，
+     导致原生滚动条 thumb 位置漂移、拖动时跟不上鼠标（第 8 轮审计，正确性优先）。
+     1.6k 段全量渲染在样机规模下可接受；50 万段级虚拟滚动仍属 PRD V1.0 性能项。 */
 }
 .seg-row.active {
   background: var(--accent-weak);
@@ -257,6 +258,25 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 }
 .seg-corrected { width: 100%; min-height: 44px; }
 .seg-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+/* 行内疑点类型选择层：紧邻触发按钮；白底浮层，不改变行高与滚动布局 */
+.issue-trigger-wrap { position: relative; display: inline-block; }
+.type-menu {
+  /* position:fixed + portal 到 body：菜单完全不参与 .wb-list 滚动几何，
+     不改变 scrollHeight/scrollTop；坐标由 menuPlacement 碰撞感知计算。 */
+  position: fixed;
+  z-index: 60;
+  min-width: 176px;
+  background: var(--canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.type-menu-title { font-size: 12px; color: var(--text-dim); padding: 4px 8px 2px; }
+.type-menu-item { text-align: left; border: none; background: transparent; }
+.type-menu-item:hover { background: var(--panel); }
 .empty-state {
   margin: 40px auto;
   text-align: center;

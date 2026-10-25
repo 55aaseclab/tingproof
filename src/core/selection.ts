@@ -93,3 +93,11 @@ export function planLoopToggle(
 ): { locateFirst: boolean } {
   return { locateFirst: currentSelectedId !== targetSegmentId };
 }
+
+/**
+ * 撤销确认后的目标状态（PRD V1.0.4 行内确认/撤销确认规则）：
+ * 有未解决疑点 → 回到“有疑点”（questioned）；否则 → 回到“校对中”（editing）。
+ */
+export function planUnconfirm(hasOpenIssue: boolean): "questioned" | "editing" {
+  return hasOpenIssue ? "questioned" : "editing";
+}

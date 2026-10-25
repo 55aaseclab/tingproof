@@ -12,6 +12,7 @@ import {
   nextUnreviewedAfter,
   planConfirm,
   planLoopToggle,
+  planUnconfirm,
   segmentIdForRange,
   type SegmentLike,
 } from "../src/core/selection.js";
@@ -118,5 +119,13 @@ describe("segmentIdForRange / planLoopToggle（审计项 3）", () => {
     expect(planLoopToggle("s1", "s1")).toEqual({ locateFirst: false });
     expect(planLoopToggle("s1", "s2")).toEqual({ locateFirst: true });
     expect(planLoopToggle(null, "s2")).toEqual({ locateFirst: true });
+  });
+});
+
+
+describe("planUnconfirm（审计/PRD V1.0.4 行内确认可撤销）", () => {
+  it("有未解决疑点 → questioned；无 → editing", () => {
+    expect(planUnconfirm(true)).toBe("questioned");
+    expect(planUnconfirm(false)).toBe("editing");
   });
 });

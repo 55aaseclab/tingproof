@@ -31,6 +31,7 @@ import { safeNavigate } from "../core/navigation.js";
 import {
   planConfirm,
   planLoopToggle,
+  planUnconfirm,
   segmentIdForRange,
 } from "../core/selection.js";
 import { randomUuid, sha256Hex } from "../core/identity.js";
@@ -58,6 +59,7 @@ import { SegmentList } from "./SegmentList.js";
 import { IssuePanel } from "./IssuePanel.js";
 import { ExportDialog } from "./ExportDialog.js";
 import { KeymapBar } from "./KeymapBar.js";
+import { useManualScrollTakeover } from "./useManualScroll.js";
 
 interface Props {
   meta: ProjectMeta;
@@ -93,7 +95,6 @@ export function Workbench({
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
-  const programmaticScrollRef = useRef(false);
   const segmentsRef = useRef(segments);
   const sortedRef = useRef<SegmentRecord[]>(initialSegments);
   const metaRef = useRef(meta);
@@ -392,7 +393,16 @@ export function Workbench({
     if (first) playerRef.current.setRange({ startMs: first.startMs, endMs: first.endMs });
   }, []);
 
-  // 跟随滚动（用户滚轮打断；可点“回到播放点”恢复）。
+  // 人工滚动接管（PRD V1.0.4）：滚轮/触控板/滚动条/键盘滚动的首个事件立即暂停跟随；
+  // 程序自身 scrollIntoView 经 beginProgrammatic 包裹，不会被误判为用户接管。
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  const { beginProgrammatic } = useManualScrollTakeover(listScrollRef, {
+    enabled: () => followRef.current,
+    onTakeover: () => setFollow(false),
+  });
+
+  // 跟随滚动（用户任何人工滚动打断；可点“回到播放点”或定位/播放恢复）。
   useEffect(() => {
     if (!follow || !selectedId) return;
     const container = listScrollRef.current;
@@ -402,13 +412,9 @@ export function Workbench({
     const rect = el.getBoundingClientRect();
     const box = container.getBoundingClientRect();
     if (rect.top < box.top + 8 || rect.bottom > box.bottom - 8) {
-      programmaticScrollRef.current = true;
-      el.scrollIntoView({ block: "center" });
-      window.setTimeout(() => {
-        programmaticScrollRef.current = false;
-      }, 150);
+      beginProgrammatic(() => el.scrollIntoView({ block: "center" }));
     }
-  }, [selectedId, follow]);
+  }, [selectedId, follow, beginProgrammatic]);
 
   // ---------- 片段操作 ----------
 
@@ -456,27 +462,29 @@ export function Workbench({
   }, []);
 
   /**
-   * 执行确认计划。rowConfirmed=true 表示来自行内按钮（确认被点击的段）；
-   * Ctrl+Enter 传入当前选中段并跳转播放。
+   * 行内确认 / Ctrl+Enter 确认（PRD V1.0.4）。
+   * - 行内（advance=false）：确认被点击的段，并把选中段/活动播放范围切换为「按钮所在行」，
+   *   不自动播放、不 seek（播放头保持原位，PRD 90a17ac）、不跳到下一段。
+   * - Ctrl+Enter（advance=true）：确认当前选中段，选择下一未校对段并精确定位其 start_ms、
+   *   聚焦其编辑框；不自动播放。
    */
   const applyConfirm = useCallback(
-    (segmentId: string, opts: { seekToNext: boolean }) => {
+    (segmentId: string, opts: { advance: boolean }) => {
       const plan = planConfirm(sortedRef.current, segmentId);
       if (!plan.ok) {
         window.alert(plan.reason);
         return;
       }
       setStatus(plan.confirmedId, "confirmed");
-      if (plan.nextId) {
-        if (opts.seekToNext) {
-          // 保存并确认当前段，选择下一未校对段并精确定位其 start_ms，不自动播放（PRD V1.0.2 §3.3.5）。
+      if (opts.advance) {
+        if (plan.nextId) {
           selectSegment(plan.nextId, { locate: true, pauseIfPlaying: true });
           setFollow(true);
           focusSegmentEditor(plan.nextId);
-        } else {
-          // 仅推进选中：同样同步活动播放范围，避免 F8/循环指示指向旧段。
-          selectSegment(plan.nextId, {});
         }
+      } else {
+        // 选中目标 = 按钮所在行；绝不选择 plan.nextId；播放头保持原位（不 seek）。
+        selectSegment(plan.confirmedId, {});
       }
     },
     [setStatus, focusSegmentEditor, updateSelected, selectSegment],
@@ -576,6 +584,29 @@ export function Workbench({
       save.schedule();
     },
     [save, enqueueSegmentSave],
+  );
+
+  /** 行内类型选择层选定后创建：severity 恒为 blocking、备注为空（PRD V1.0.4）。 */
+  const handleCreateIssueWithType = useCallback(
+    (segmentId: string, type: IssueType) => {
+      createIssue(segmentId, type, "blocking", "");
+    },
+    [createIssue],
+  );
+
+  /** 行内撤销确认：有未解决疑点回到 questioned，否则 editing；
+   *  选中目标与行内确认一致（按钮所在行），不跳下一段、不改变播放头。 */
+  const unconfirmSegment = useCallback(
+    (segmentId: string) => {
+      const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
+      if (!seg || seg.status !== "confirmed") return;
+      const hasOpen = issuesRef.current.some(
+        (i) => i.segmentId === segmentId && i.status === "open",
+      );
+      setStatus(segmentId, planUnconfirm(hasOpen));
+      selectSegment(segmentId, {});
+    },
+    [setStatus, selectSegment],
   );
 
   const issuesRef = useRef(issues);
@@ -696,7 +727,7 @@ export function Workbench({
         e.preventDefault();
         e.stopPropagation();
         if (selectedIdRef.current) {
-          applyConfirm(selectedIdRef.current, { seekToNext: true });
+          applyConfirm(selectedIdRef.current, { advance: true });
         }
         return;
       }
@@ -835,13 +866,7 @@ export function Workbench({
       {audioError && <div className="notice-err" style={{ padding: "6px 14px" }}>✖ {audioError}</div>}
 
       <div className="wb-main">
-        <div
-          className="wb-list"
-          ref={listScrollRef}
-          onWheel={() => {
-            if (!programmaticScrollRef.current) setFollow(false);
-          }}
-        >
+        <div className="wb-list" ref={listScrollRef}>
           {segments.length === 0 ? (
             <div className="empty-state">
               <div>该项目没有任何字幕段。</div>
@@ -854,12 +879,13 @@ export function Workbench({
               unresolvedBySegment={unresolvedBySegment(unresolved)}
               onEdit={editSegment}
               onCompositionEnd={onCompositionEnd}
-              onConfirmRow={(id) => applyConfirm(id, { seekToNext: false })}
+              onConfirmRow={(id) => applyConfirm(id, { advance: false })}
+              onUnconfirmRow={unconfirmSegment}
               onLocate={handleRowLocate}
               onTogglePlay={handleRowTogglePlay}
               playingSegmentId={player.playing ? selectedId : null}
               onLoop={toggleLoopSegment}
-              onCreateIssue={(id) => createIssue(id, "unclear", "blocking", "")}
+              onCreateIssueWithType={handleCreateIssueWithType}
               loopSegmentId={segmentIdForRange(sortedSegments, player.loop)}
             />
           )}
