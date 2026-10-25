@@ -5,7 +5,10 @@
  *   选择类型后才对该段创建一条 blocking 疑点；按钮与菜单不冒泡成行定位、不改播放；
  * - 行内确认按钮双向：未确认“✓ 确认本段”，已确认“↶ 取消确认”（撤销不前进/不定位/不改播放）；
  * - 行内播放/暂停开关：未播放显示“▶ 播放”，播放中显示“⏸ 暂停”，可访问名称同步；
- *   按钮事件不冒泡触发行定位；双击时间码等价于该行播放/暂停开关。
+ *   按钮事件不冒泡触发行定位；双击时间码等价于该行播放/暂停开关；
+ * - 行内 ±2 秒复听（V1.0.7 AC-051）：“⏪ 2s / ⏩ 2s”（可达名称“后退 2 秒 / 前进 2 秒”），
+ *   固定排在播放/暂停之后、确认/取消确认之前；点击先选中按钮所在段，再由 Workbench
+ *   复用 player.skip 的段内钳制逻辑 seek，不自动播放、不冒泡成行定位或播放/暂停开关。
  */
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { IssueTypeMenu } from "./IssueTypeMenu.js";
@@ -37,6 +40,10 @@ interface Props {
   onLocate: (segmentId: string) => void;
   /** 行内播放/暂停开关（含双击时间码）。 */
   onTogglePlay: (segmentId: string) => void;
+  /** 行内后退 2 秒（AC-051）：Workbench 先选中按钮所在段并设活动范围，再复用 skip 钳制 seek。 */
+  onSkipBack: (segmentId: string) => void;
+  /** 行内前进 2 秒（AC-051）：同 onSkipBack，方向相反。 */
+  onSkipForward: (segmentId: string) => void;
   onLoop: (segmentId: string) => void;
   /** 行内类型选择层选定后创建：type 为用户所选值。 */
   onCreateIssueWithType: (segmentId: string, type: IssueType) => void;
@@ -60,6 +67,8 @@ interface RowProps {
   onUnconfirmRow: Props["onUnconfirmRow"];
   onLocate: Props["onLocate"];
   onTogglePlay: Props["onTogglePlay"];
+  onSkipBack: Props["onSkipBack"];
+  onSkipForward: Props["onSkipForward"];
   onLoop: Props["onLoop"];
   onCreateIssueWithType: Props["onCreateIssueWithType"];
   renderProbe: Props["renderProbe"];
@@ -132,6 +141,8 @@ const SegmentRow = memo(function SegmentRow({
   onUnconfirmRow,
   onLocate,
   onTogglePlay,
+  onSkipBack,
+  onSkipForward,
   onLoop,
   onCreateIssueWithType,
   renderProbe,
@@ -157,6 +168,8 @@ const SegmentRow = memo(function SegmentRow({
     onLocate(seg.segmentId);
   };
   const toggle = () => onTogglePlay(seg.segmentId);
+  // AC-051：行内复听按钮事件不冒泡（pointerdown/click 都不触发行定位或播放/暂停开关）。
+  const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
     <div
       className={`seg-row ${selected ? "active" : ""}`}
@@ -203,6 +216,28 @@ const SegmentRow = memo(function SegmentRow({
           }
         >
           {playing ? "⏸ 暂停" : "▶ 播放"}
+        </button>
+        <button
+          onPointerDown={stopPropagation}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSkipBack(seg.segmentId);
+          }}
+          aria-label="后退 2 秒"
+          title="后退 2 秒：先选中该段并在段内钳制定位；暂停时只定位不自动播放，播放中保持播放（与 F7 共用段内钳制）"
+        >
+          ⏪ 2s
+        </button>
+        <button
+          onPointerDown={stopPropagation}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSkipForward(seg.segmentId);
+          }}
+          aria-label="前进 2 秒"
+          title="前进 2 秒：先选中该段并在段内钳制定位；暂停时只定位不自动播放，播放中保持播放（与 F9 共用段内钳制）"
+        >
+          ⏩ 2s
         </button>
         <button
           onClick={() => (isConfirmed ? onUnconfirmRow(seg.segmentId) : onConfirmRow(seg.segmentId))}
@@ -259,6 +294,8 @@ export function SegmentList({
   onUnconfirmRow,
   onLocate,
   onTogglePlay,
+  onSkipBack,
+  onSkipForward,
   onLoop,
   onCreateIssueWithType,
   renderProbe,
@@ -288,6 +325,8 @@ export function SegmentList({
           onUnconfirmRow={onUnconfirmRow}
           onLocate={onLocate}
           onTogglePlay={onTogglePlay}
+          onSkipBack={onSkipBack}
+          onSkipForward={onSkipForward}
           onLoop={onLoop}
           onCreateIssueWithType={onCreateIssueWithType}
           renderProbe={renderProbe}

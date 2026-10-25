@@ -47,12 +47,16 @@ function renderList(over: {
   selectedId?: string | null;
   onLocate?: ReturnType<typeof vi.fn>;
   onTogglePlay?: ReturnType<typeof vi.fn>;
+  onSkipBack?: ReturnType<typeof vi.fn>;
+  onSkipForward?: ReturnType<typeof vi.fn>;
   onConfirmRow?: ReturnType<typeof vi.fn>;
   onUnconfirmRow?: ReturnType<typeof vi.fn>;
   onCreateIssueWithType?: ReturnType<typeof vi.fn>;
 } = {}) {
   const onLocate = over.onLocate ?? vi.fn();
   const onTogglePlay = over.onTogglePlay ?? vi.fn();
+  const onSkipBack = over.onSkipBack ?? vi.fn();
+  const onSkipForward = over.onSkipForward ?? vi.fn();
   const onConfirmRow = over.onConfirmRow ?? vi.fn();
   const onUnconfirmRow = over.onUnconfirmRow ?? vi.fn();
   const onCreateIssueWithType = over.onCreateIssueWithType ?? vi.fn();
@@ -71,13 +75,25 @@ function renderList(over: {
       onUnconfirmRow={onUnconfirmRow}
       onLocate={onLocate}
       onTogglePlay={onTogglePlay}
+      onSkipBack={onSkipBack}
+      onSkipForward={onSkipForward}
       onLoop={vi.fn()}
       onCreateIssueWithType={onCreateIssueWithType}
     />
     </div>,
   );
   const row = utils.container.querySelector<HTMLElement>("[data-segment-id='seg-1']")!;
-  return { ...utils, row, onLocate, onTogglePlay, onConfirmRow, onUnconfirmRow, onCreateIssueWithType };
+  return {
+    ...utils,
+    row,
+    onLocate,
+    onTogglePlay,
+    onSkipBack,
+    onSkipForward,
+    onConfirmRow,
+    onUnconfirmRow,
+    onCreateIssueWithType,
+  };
 }
 
 describe("SegmentList 行内交互（AC-041 / AC-042）", () => {
@@ -183,6 +199,8 @@ describe("SegmentList 行内交互（AC-041 / AC-042）", () => {
         onUnconfirmRow={vi.fn()}
         onLocate={vi.fn()}
         onTogglePlay={vi.fn()}
+        onSkipBack={vi.fn()}
+        onSkipForward={vi.fn()}
         onLoop={vi.fn()}
         onCreateIssueWithType={vi.fn()}
       />,
@@ -191,6 +209,57 @@ describe("SegmentList 行内交互（AC-041 / AC-042）", () => {
   });
 });
 
+
+describe("行内 ±2 秒复听（PRD V1.0.7 AC-051）", () => {
+  it("六个行内按钮按「播放/暂停 → 后退 2 秒 → 前进 2 秒 → 确认/取消确认 → 疑点 → 循环」排列", () => {
+    const { row } = renderList();
+    const actions = row.querySelector(".seg-actions")!;
+    const labels = Array.from(actions.querySelectorAll("button")).map((b) =>
+      b.getAttribute("aria-label") ?? b.textContent,
+    );
+    expect(labels).toEqual([
+      "播放", // 未播放时段内播放开关
+      "后退 2 秒",
+      "前进 2 秒",
+      "确认本段",
+      "⚑ 疑点",
+      "⭯ 循环",
+    ]);
+    // 播放中：第一个按钮切换为「暂停」，其余顺序不变。
+    const second = renderList({ playingSegmentId: "seg-1" });
+    const labels2 = Array.from(
+      second.row.querySelector(".seg-actions")!.querySelectorAll("button"),
+    ).map((b) => b.getAttribute("aria-label") ?? b.textContent);
+    expect(labels2).toEqual(["暂停", "后退 2 秒", "前进 2 秒", "确认本段", "⚑ 疑点", "⭯ 循环"]);
+  });
+
+  it("可达名称为「后退 2 秒 / 前进 2 秒」，可见文案为 ⏪ 2s / ⏩ 2s", () => {
+    const { row } = renderList();
+    const back = within(row).getByRole("button", { name: "后退 2 秒" });
+    const fwd = within(row).getByRole("button", { name: "前进 2 秒" });
+    expect(back.textContent).toContain("⏪ 2s");
+    expect(fwd.textContent).toContain("⏩ 2s");
+    expect(screen.queryByRole("button", { name: "⏪ 2s" })).toBeNull(); // 可达名称不是符号文案
+    expect(screen.queryByRole("button", { name: "⏩ 2s" })).toBeNull();
+  });
+
+  it("点击后退/前进：只调用对应回调，不冒泡成行定位或播放/暂停开关", () => {
+    const { row, onSkipBack, onSkipForward, onLocate, onTogglePlay } = renderList();
+    const back = within(row).getByRole("button", { name: "后退 2 秒" });
+    const fwd = within(row).getByRole("button", { name: "前进 2 秒" });
+    // 真实点击序列：pointerdown → click（含 stopPropagation 语义）。
+    fireEvent.pointerDown(back);
+    fireEvent.click(back);
+    expect(onSkipBack).toHaveBeenCalledTimes(1);
+    expect(onSkipBack).toHaveBeenCalledWith("seg-1");
+    fireEvent.pointerDown(fwd);
+    fireEvent.click(fwd);
+    expect(onSkipForward).toHaveBeenCalledTimes(1);
+    expect(onSkipForward).toHaveBeenCalledWith("seg-1");
+    expect(onLocate).not.toHaveBeenCalled();
+    expect(onTogglePlay).not.toHaveBeenCalled();
+  });
+});
 
 describe("行内疑点类型选择层（PRD V1.0.4 AC-044）", () => {
   it("点击 ⚑ 只展开选择层：8 类菜单项、无预选、不创建记录、aria-expanded 同步", () => {
@@ -256,6 +325,8 @@ describe("行内疑点类型选择层（PRD V1.0.4 AC-044）", () => {
         onUnconfirmRow={vi.fn()}
         onLocate={vi.fn()}
         onTogglePlay={vi.fn()}
+        onSkipBack={vi.fn()}
+        onSkipForward={vi.fn()}
         onLoop={vi.fn()}
         onCreateIssueWithType={vi.fn()}
       />,
@@ -323,11 +394,11 @@ describe("行内确认/撤销确认（PRD V1.0.4 AC-045）", () => {
 
 
 describe("行内按钮尺寸一致（PRD V1.0.5 AC-047）", () => {
-  it("四个行内按钮统一 30px 高度、垂直居中、行高 1（CSS 保证各缩放下高度差 ≤ 1px）", () => {
+  it("六个行内按钮统一 30px 高度、垂直居中、行高 1（CSS 保证各缩放下高度差 ≤ 1px）", () => {
     const removeStyles = injectStyles();
     const { container } = renderList();
     const row = container.querySelector<HTMLElement>("[data-segment-id='seg-1']")!;
-    const names = ["播放", "确认本段", "⚑ 疑点", "⭯ 循环"];
+    const names = ["播放", "后退 2 秒", "前进 2 秒", "确认本段", "⚑ 疑点", "⭯ 循环"];
     const heights = names.map((n) => {
       const btn = within(row).getByRole("button", { name: n });
       return getComputedStyle(btn).height;
@@ -369,6 +440,8 @@ describe("行内按钮尺寸一致（PRD V1.0.5 AC-047）", () => {
           onUnconfirmRow={vi.fn()}
           onLocate={vi.fn()}
           onTogglePlay={vi.fn()}
+          onSkipBack={vi.fn()}
+          onSkipForward={vi.fn()}
           onLoop={vi.fn()}
           onCreateIssueWithType={vi.fn()}
         />
@@ -404,6 +477,8 @@ describe("输入渲染范围（PRD V1.0.5 AC-048）", () => {
     const onUnconfirmRow = useCallback(() => undefined, []);
     const onLocate = useCallback(() => undefined, []);
     const onTogglePlay = useCallback(() => undefined, []);
+    const onSkipBack = useCallback(() => undefined, []);
+    const onSkipForward = useCallback(() => undefined, []);
     const onLoop = useCallback(() => undefined, []);
     const onCreateIssueWithType = useCallback(() => undefined, []);
     return (
@@ -421,6 +496,8 @@ describe("输入渲染范围（PRD V1.0.5 AC-048）", () => {
           onUnconfirmRow={onUnconfirmRow}
           onLocate={onLocate}
           onTogglePlay={onTogglePlay}
+          onSkipBack={onSkipBack}
+          onSkipForward={onSkipForward}
           onLoop={onLoop}
           onCreateIssueWithType={onCreateIssueWithType}
           renderProbe={renderProbe}

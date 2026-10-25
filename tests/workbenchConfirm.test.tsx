@@ -123,18 +123,27 @@ describe("Workbench 行内确认 / Ctrl+Enter（第 10 轮审计）", () => {
     expect(within(row("seg-a")).getByRole("button", { name: "确认本段" })).toBeTruthy();
   });
 
-  it("底栏去重（V1.0.6）：无独立播放/暂停、⏪/⏩ 按钮与“选中策略”文字；时间显示仍在", () => {
+  it("底栏去重（V1.0.6/V1.0.7）：底栏无独立播放/暂停、⏪/⏩ 与“选中策略”；行内 ±2 秒复听在字幕行内", () => {
     renderWorkbench();
-    // 底部不再有独立播放/暂停按钮：名为“播放”的按钮只剩 3 个行内播放开关。
+    // 行内 ±2 秒复听（AC-051）：每行「后退 2 秒 / 前进 2 秒」各一个。
+    expect(screen.getAllByRole("button", { name: "后退 2 秒" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "前进 2 秒" })).toHaveLength(3);
+    // 名为“播放”的按钮只剩 3 个行内播放开关。
     expect(screen.getAllByRole("button", { name: "播放" })).toHaveLength(3);
-    expect(screen.queryByText("⏪ 2s")).toBeNull();
-    expect(screen.queryByText("⏩ 2s")).toBeNull();
-    expect(screen.queryByText("选中策略")).toBeNull();
+    // 底部工具栏（.player-bar）内不出现任何独立播放/暂停、⏪/⏩ 按钮及“选中策略”文字。
+    const playerBar = document.querySelector(".player-bar")!;
+    expect(within(playerBar as HTMLElement).queryByRole("button", { name: "播放" })).toBeNull();
+    expect(within(playerBar as HTMLElement).queryByRole("button", { name: "暂停" })).toBeNull();
+    expect(within(playerBar as HTMLElement).queryByText("⏪ 2s")).toBeNull();
+    expect(within(playerBar as HTMLElement).queryByText("⏩ 2s")).toBeNull();
+    expect(within(playerBar as HTMLElement).queryByText("选中策略")).toBeNull();
     // 保留项：时间显示、速度、自动回退、循环、回到播放点（条件性）、时间轴。
-    expect(screen.getByText(/\/ 00:00:00.000/)).toBeTruthy(); // 总时长显示
-    expect(screen.getByText("速度")).toBeTruthy();
-    expect(screen.getByText((_, el) => el?.textContent === "自动回退ms")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /循环本段/ })).toBeTruthy();
+    expect(within(playerBar as HTMLElement).getByText(/\/ 00:00:00.000/)).toBeTruthy(); // 总时长显示
+    expect(within(playerBar as HTMLElement).getByText("速度")).toBeTruthy();
+    expect(
+      within(playerBar as HTMLElement).getByText((_, el) => el?.textContent === "自动回退ms"),
+    ).toBeTruthy();
+    expect(within(playerBar as HTMLElement).getByRole("button", { name: /循环本段/ })).toBeTruthy();
     expect(screen.getByTestId("timeline")).toBeTruthy();
   });
 

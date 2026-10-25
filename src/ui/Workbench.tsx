@@ -561,6 +561,43 @@ export function Workbench({
     [updateSelected],
   );
 
+  /**
+   * 行内 ±2 秒复听（PRD V1.0.7 AC-051），与 F7/F9 共用 player.skip 的段内钳制：
+   * - 目标段就是当前正在播放的活动范围 → 直接 skip，保持播放、段内 seek；
+   * - 否则先同步切换选中与活动范围（换行时暂停旧段并定位到目标段段首），再 skip——
+   *   全程不调用 play()：暂停时只定位、绝不自动播放。
+   * 决策只读 ref（sortedRef/selectedIdRef/playerRef/audioRef），不依赖 React state 异步更新。
+   */
+  const handleRowSkip = useCallback(
+    (segmentId: string, deltaMs: number) => {
+      const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
+      if (!seg) return;
+      const a = audioRef.current;
+      const r = playerRef.current.range;
+      const playingThisSeg =
+        !!a && !a.paused && !!r && r.startMs === seg.startMs && r.endMs === seg.endMs;
+      if (!playingThisSeg) {
+        setFollow(true);
+        selectSegment(segmentId, {
+          locate: selectedIdRef.current !== segmentId,
+          pauseIfPlaying: true,
+        });
+      }
+      playerRef.current.skip(deltaMs);
+    },
+    [selectSegment],
+  );
+
+  /** 稳定行内复听回调（AC-051 顺序：播放/暂停之后、确认之前）。 */
+  const handleRowSkipBack = useCallback(
+    (segmentId: string) => handleRowSkip(segmentId, -2000),
+    [handleRowSkip],
+  );
+  const handleRowSkipForward = useCallback(
+    (segmentId: string) => handleRowSkip(segmentId, 2000),
+    [handleRowSkip],
+  );
+
   /** 疑点面板「跳转播放」：选中目标段并从其段首播放（区别于行内播放/暂停开关）。 */
   const handleJumpPlay = useCallback(
     (segmentId: string) => {
@@ -956,6 +993,8 @@ export function Workbench({
               onLocate={handleRowLocate}
               renderProbe={segmentRenderProbe}
               onTogglePlay={handleRowTogglePlay}
+              onSkipBack={handleRowSkipBack}
+              onSkipForward={handleRowSkipForward}
               playingSegmentId={player.playing ? selectedId : null}
               onLoop={toggleLoopSegment}
               onCreateIssueWithType={handleCreateIssueWithType}
