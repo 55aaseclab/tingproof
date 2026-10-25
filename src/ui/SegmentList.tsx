@@ -222,7 +222,7 @@ const SegmentRow = memo(function SegmentRow({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => onToggleMenu(seg.segmentId)}
-            title="打开疑点类型选择（8 类，选择后才创建）；Ctrl+? 直接创建「听不清 / 阻塞」疑点"
+            title="打开疑点类型选择（8 类，选择后才创建）；Ctrl+? 创建默认疑点"
           >
             ⚑ 疑点
           </button>

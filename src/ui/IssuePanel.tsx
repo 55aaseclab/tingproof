@@ -76,7 +76,7 @@ export function IssuePanel({
               为当前段新建疑点（表单）
             </button>
             <div className="hint">
-              行内“⚑ 疑点”按钮会直接创建默认疑点（听不清 / 阻塞）；
+              行内“⚑ 疑点”按钮会直接创建默认疑点；
               快捷键 <span className="kbd">Ctrl</span>+<span className="kbd">?</span> 同。
             </div>
           </>

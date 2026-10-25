@@ -983,19 +983,6 @@ export function Workbench({
           subscribeCurrentMs={player.subscribeCurrentMs}
         />
         <div className="player-controls">
-          <button
-            onClick={handleMainToggle}
-            title={`播放/暂停当前段（${keymap.playPause}）`}
-            aria-label={player.playing ? "暂停" : "播放"}
-          >
-            {player.playing ? "⏸ 暂停" : "▶ 播放"}
-          </button>
-          <button onClick={() => player.skip(-2000)} title={`后退 2 秒（${keymap.seekBack}）`}>
-            ⏪ 2s
-          </button>
-          <button onClick={() => player.skip(2000)} title={`前进 2 秒（${keymap.seekForward}）`}>
-            ⏩ 2s
-          </button>
           <TimeDisplay subscribeCurrentMs={player.subscribeCurrentMs} totalMs={totalMs} />
           <label>
             速度
@@ -1044,9 +1031,6 @@ export function Workbench({
               回到播放点
             </button>
           )}
-          <span className="hint" title="选中策略：播放进入某段时自动选中；位于字幕间隙时保持当前选中段">
-            选中策略
-          </span>
         </div>
         <audio
           ref={audioRef}

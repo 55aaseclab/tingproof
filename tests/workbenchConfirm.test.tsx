@@ -123,6 +123,52 @@ describe("Workbench 行内确认 / Ctrl+Enter（第 10 轮审计）", () => {
     expect(within(row("seg-a")).getByRole("button", { name: "确认本段" })).toBeTruthy();
   });
 
+  it("底栏去重（V1.0.6）：无独立播放/暂停、⏪/⏩ 按钮与“选中策略”文字；时间显示仍在", () => {
+    renderWorkbench();
+    // 底部不再有独立播放/暂停按钮：名为“播放”的按钮只剩 3 个行内播放开关。
+    expect(screen.getAllByRole("button", { name: "播放" })).toHaveLength(3);
+    expect(screen.queryByText("⏪ 2s")).toBeNull();
+    expect(screen.queryByText("⏩ 2s")).toBeNull();
+    expect(screen.queryByText("选中策略")).toBeNull();
+    // 保留项：时间显示、速度、自动回退、循环、回到播放点（条件性）、时间轴。
+    expect(screen.getByText(/\/ 00:00:00.000/)).toBeTruthy(); // 总时长显示
+    expect(screen.getByText("速度")).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.textContent === "自动回退ms")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /循环本段/ })).toBeTruthy();
+    expect(screen.getByTestId("timeline")).toBeTruthy();
+  });
+
+  it("快捷键能力未被删除（V1.0.6）：F8 仍触发范围感知播放，F7/F9 仍钳制跳转", () => {
+    const { row } = renderWorkbench();
+    const audio = document.querySelector("audio")!;
+    const playSpy = vi.spyOn(audio, "play").mockResolvedValue(undefined);
+    // F8：播放当前选中段（底部按钮已移除，快捷键能力保留）。
+    fireEvent.keyDown(window, { key: "F8" });
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    // F7/F9：skip 钳制在当前段内（A: 1000–2000ms）。
+    audio.currentTime = 1.5;
+    fireEvent.keyDown(window, { key: "F7" });
+    expect(audio.currentTime).toBe(1); // 后退钳到段首 1000ms
+    fireEvent.keyDown(window, { key: "F9" });
+    expect(audio.currentTime).toBe(2); // 前进钳到段尾 2000ms（范围上限，不越界）
+    playSpy.mockRestore();
+    void row;
+  });
+
+  it("行内播放仍存在（V1.0.6）：非受控播放开关保留在字幕行内", () => {
+    renderWorkbench();
+    const playButtons = screen.getAllByRole("button", { name: "播放" });
+    expect(playButtons.length).toBeGreaterThan(0); // 每行都有行内播放
+    const issueTriggers = screen.getAllByRole("button", { name: "⚑ 疑点" });
+    expect(issueTriggers.length).toBeGreaterThan(0);
+    // 文案范围（第 12 轮追加）：title 保留“先选类型、不选不创建”语义，不含旧括注。
+    for (const t of issueTriggers) {
+      expect(t.getAttribute("title")).toContain("选择后才创建");
+      expect(t.getAttribute("title")).not.toContain("听不清 / 阻塞");
+    }
+    expect(screen.getAllByRole("button", { name: "确认本段" }).length).toBeGreaterThan(0);
+  });
+
   it("行内取消确认：操作对象 = 按钮所在行，选中目标一致，不跳下一段", () => {
     const { row, confirmBtn, unconfirmBtn } = renderWorkbench([
       makeSeg("seg-a", 1000, 2000),

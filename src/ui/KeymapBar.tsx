@@ -57,7 +57,7 @@ export function KeymapBar({ keymap, onClose }: { keymap: KeymapApi; onClose: () 
             <td>
               <span className="kbd">Ctrl</span>+<span className="kbd">?</span>
             </td>
-            <td className="hint">对当前段创建默认疑点（听不清 / 阻塞）</td>
+            <td className="hint">对当前段创建默认疑点</td>
           </tr>
           <tr>
             <th>退出编辑框</th>
