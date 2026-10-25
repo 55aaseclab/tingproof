@@ -563,10 +563,13 @@ export function Workbench({
 
   /**
    * 行内 ±2 秒复听（PRD V1.0.7 AC-051），与 F7/F9 共用 player.skip 的段内钳制：
-   * - 目标段就是当前正在播放的活动范围 → 直接 skip，保持播放、段内 seek；
-   * - 否则先同步切换选中与活动范围（换行时暂停旧段并定位到目标段段首），再 skip——
+   * - 目标行已选中且就是当前正在播放的活动范围 → 直接 skip，保持播放、段内 seek；
+   * - 目标行未选中但播放器正在播其范围（重复时间范围段）→ 仅幂等切换选中
+   *   （setRange 同范围 no-op，不打断播放），再 skip；
+   * - 其余换段 → 先同步切换选中与活动范围（暂停旧段并定位到目标段段首），再 skip——
    *   全程不调用 play()：暂停时只定位、绝不自动播放。
-   * 决策只读 ref（sortedRef/selectedIdRef/playerRef/audioRef），不依赖 React state 异步更新。
+   * 决策只读 ref（sortedRef/selectedIdRef/playerRef/audioRef），不依赖 React state 异步更新；
+   * skip 后重申目标行选中：位置反查在重复时间范围下恒返回首行，不得覆盖显式行选择。
    */
   const handleRowSkip = useCallback(
     (segmentId: string, deltaMs: number) => {
@@ -574,16 +577,20 @@ export function Workbench({
       if (!seg) return;
       const a = audioRef.current;
       const r = playerRef.current.range;
-      const playingThisSeg =
+      const playingTargetRange =
         !!a && !a.paused && !!r && r.startMs === seg.startMs && r.endMs === seg.endMs;
-      if (!playingThisSeg) {
+      if (selectedIdRef.current !== segmentId) {
         setFollow(true);
         selectSegment(segmentId, {
-          locate: selectedIdRef.current !== segmentId,
-          pauseIfPlaying: true,
+          locate: !playingTargetRange,
+          pauseIfPlaying: !playingTargetRange,
         });
       }
       playerRef.current.skip(deltaMs);
+      // usePlaybackSelection 按播放头位置反查段（重复时间范围恒返回第一行），
+      // selectSegment/skip 内 seek 的位置通知会把选中拉回重复范围的首行；
+      // 显式行操作必须以按钮所在行为准（AC-051），这里重申目标行选中（幂等）。
+      if (selectedIdRef.current !== segmentId) updateSelected(segmentId);
     },
     [selectSegment],
   );

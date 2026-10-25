@@ -265,12 +265,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   field-sizing: content;
 }
 .seg-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
-/* AC-047：四个行内按钮统一可见高度与垂直盒模型——固定 CSS 高度 + 行高 1 + 垂直居中，
-   符号字形（⚑/⭯/⏸/▶）与 CJK 文字的行盒差异被消除；宽度按文案自适应。
+/* AC-047：六个行内按钮统一可见高度与垂直盒模型——固定 CSS 高度 + 行高 1 + 垂直居中，
+   符号字形（⚑/⭯/⏸/▶/⏪/⏩）与 CJK 文字的行盒差异被消除；宽度按文案自适应。
    打开菜单、按钮文案切换都不改变高度或字幕行高。 */
 /* 根因（第 11 轮审计）：.seg-actions 为 flex，直接子按钮默认 stretch 会等高，
    但 ⚑ 按钮嵌在 .issue-trigger-wrap 内不参与拉伸 → 高度差。
-   用 display:contents 让包装器退出盒树，四个按钮成为同级 flex item；
+   用 display:contents 让包装器退出盒树，六个按钮成为同级 flex item；
    再叠加固定高度 + 行高 1，保证任意缩放/文案/菜单状态下可见高度一致。 */
 .issue-trigger-wrap { display: contents; }
 .seg-actions button {

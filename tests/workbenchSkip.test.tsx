@@ -184,6 +184,39 @@ describe("行内 ±2 秒复听（PRD V1.0.7 AC-051）", () => {
     expect(playSpy).not.toHaveBeenCalled();
   });
 
+  it("重复时间范围行：播放中点击另一行 ⏪ 仍切换选中到目标行，保持播放且不重复 play", () => {
+    // 两行时间范围完全相同（D1/D2 均为 30s–40s）：范围匹配不能替代行选中。
+    const dup = [
+      ...SEGMENTS,
+      makeSeg("seg-d1", 30_000, 40_000),
+      makeSeg("seg-d2", 30_000, 40_000),
+    ];
+    const { row, skipBack, playButton, expectActive, playSpy } = renderWorkbench(dup);
+    fireEvent.click(playButton("seg-d1"));
+    audioEl().currentTime = 35;
+    fireEvent.click(skipBack("seg-d2"));
+    expectActive("seg-d2"); // 点击目标行始终成为当前选中段
+    expect(audioEl().paused).toBe(false); // 播放的就是目标范围：保持播放
+    expect(audioEl().currentTime).toBe(33); // 段内 seek：35000 - 2000
+    expect(playSpy).toHaveBeenCalledTimes(1); // 不重新 play
+    expect(within(row("seg-d2")).getByRole("button", { name: "暂停" })).toBeTruthy();
+  });
+
+  it("重复时间范围行：暂停时点击另一行 ⏪ 切换选中并定位段首后再偏移", () => {
+    const dup = [
+      ...SEGMENTS,
+      makeSeg("seg-d1", 30_000, 40_000),
+      makeSeg("seg-d2", 30_000, 40_000),
+    ];
+    const { skipBack, expectActive, playSpy } = renderWorkbench(dup);
+    audioEl().currentTime = 35;
+    fireEvent.click(skipBack("seg-d2"));
+    expectActive("seg-d2");
+    expect(audioEl().paused).toBe(true);
+    expect(audioEl().currentTime).toBe(30); // 定位目标段段首后退 2 秒 → 钳到段首
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
   it("底部工具栏无独立播放/暂停与 ±2s 控件（AC-050）", () => {
     renderWorkbench();
     const playerBar = document.querySelector(".player-bar")!;
