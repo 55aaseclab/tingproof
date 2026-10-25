@@ -21,6 +21,13 @@ interface Props {
   onOpenProject: (projectId: string, sessionAudioFile: File | null) => void;
 }
 
+/** 最近项目默认最多展示条数；超出后可“加载更多”（PRD 2.3.2）。 */
+const RECENT_PAGE_SIZE = 20;
+
+function formatUpdatedAt(ts: number): string {
+  return new Date(ts).toLocaleString("zh-CN", { hour12: false });
+}
+
 interface PickedFile {
   file: File;
   /** FS Access 时可从同一句柄再次读取；普通 input 也兼容。 */
@@ -76,13 +83,19 @@ export function ImportScreen({ onOpenProject }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [recentVisibleCount, setRecentVisibleCount] = useState(RECENT_PAGE_SIZE);
   const [confirmedMismatch, setConfirmedMismatch] = useState(false);
   const abortRef = useRef(false);
 
   useEffect(() => {
     abortRef.current = false;
     listProjects().then((ps) => {
-      if (!abortRef.current) setProjects(ps.slice(0, 3));
+      if (abortRef.current) return;
+      // AC-052：同一 origin 下的全部项目都进入最近历史（已按 updatedAt 倒序），
+      // 不再只取第一条作为“继续上次校对”。
+      setProjects(ps);
+      setProjectsLoaded(true);
     });
     return () => {
       abortRef.current = true;
@@ -202,19 +215,52 @@ export function ImportScreen({ onOpenProject }: Props) {
         本地优先人工听校样机：导入一份 MP3 + SRT，边听边校；源文件只读，全部数据保存在本机浏览器。
       </div>
 
-      {projects.length > 0 && (
-        <div className="resume-card">
-          <div>
-            <div>继续上次校对</div>
-            <div className="hint">
-              {projects[0].name} · 已存 {formatDisplay(projects[0].playback.positionMs)} ·
-              {" "}更新于 {new Date(projects[0].updatedAt).toLocaleTimeString("zh-CN")}
-            </div>
+      {projectsLoaded && (
+        <section className="recent-projects">
+          <div className="recent-head">
+            <h2>继续上次校对</h2>
+            <span className="hint">
+              {projects.length > 0
+                ? `共 ${projects.length} 个项目 · 按更新时间倒序`
+                : "暂无历史"}
+            </span>
           </div>
-          <button className="primary" onClick={() => onOpenProject(projects[0].projectId, null)}>
-            打开
-          </button>
-        </div>
+          <p className="hint storage-boundary">
+            存储边界提示：项目数据只保存在当前浏览器、当前地址（origin）的本地 IndexedDB 中；localhost、
+            局域网 IP、其他浏览器或无痕窗口各自独立、互不共享。换设备或换地址看不到这些记录，不代表数据被删除。
+          </p>
+          {projects.length === 0 ? (
+            <p className="hint">当前浏览器/当前地址没有本地项目；可从下方导入 MP3 + SRT 创建第一个。</p>
+          ) : (
+            <>
+              <ul className="recent-list" aria-label="最近项目">
+                {projects.slice(0, recentVisibleCount).map((p) => (
+                  <li key={p.projectId} className="recent-item">
+                    <div className="recent-info">
+                      <div className="recent-name">{p.name}</div>
+                      <div className="hint">
+                        已存播放位置 {formatDisplay(p.playback.positionMs)} ·{" "}
+                        更新于 {formatUpdatedAt(p.updatedAt)}
+                      </div>
+                    </div>
+                    <button
+                      className="primary"
+                      aria-label={`打开 ${p.name}`}
+                      onClick={() => onOpenProject(p.projectId, null)}
+                    >
+                      打开
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {recentVisibleCount < projects.length && (
+                <button onClick={() => setRecentVisibleCount((n) => n + RECENT_PAGE_SIZE)}>
+                  加载更多（还有 {projects.length - recentVisibleCount} 个）
+                </button>
+              )}
+            </>
+          )}
+        </section>
       )}
 
       <div className="pick-row">

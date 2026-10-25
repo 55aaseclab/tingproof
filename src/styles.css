@@ -146,17 +146,41 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   white-space: pre-wrap;
   color: var(--danger);
 }
-.resume-card {
+/* 最近项目列表（AC-052）：白底、可访问的独立条目列表 */
+.recent-projects {
   background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.recent-projects h2 { font-size: 16px; margin: 0; color: var(--text); }
+.recent-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.recent-projects .hint { margin: 0; }
+.recent-projects .storage-boundary { color: var(--text-dim); }
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.recent-item {
+  display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
 }
+.recent-item .recent-info { min-width: 0; }
+.recent-item .recent-name { font-weight: 600; word-break: break-all; }
 .kbd {
   display: inline-block;
   border: 1px solid var(--border-strong);
