@@ -160,7 +160,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .recent-projects h2 { font-size: 16px; margin: 0; color: var(--text); }
 .recent-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .recent-projects .hint { margin: 0; }
-.recent-projects .storage-boundary { color: var(--text-dim); }
 .recent-list {
   list-style: none;
   margin: 0;

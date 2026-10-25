@@ -219,18 +219,14 @@ export function ImportScreen({ onOpenProject }: Props) {
         <section className="recent-projects">
           <div className="recent-head">
             <h2>继续上次校对</h2>
-            <span className="hint">
-              {projects.length > 0
-                ? `共 ${projects.length} 个项目 · 按更新时间倒序`
-                : "暂无历史"}
-            </span>
+            {projects.length > 0 && (
+              <span className="hint">
+                共 {projects.length} 个项目 · 按更新时间倒序
+              </span>
+            )}
           </div>
-          <p className="hint storage-boundary">
-            存储边界提示：项目数据只保存在当前浏览器、当前地址（origin）的本地 IndexedDB 中；localhost、
-            局域网 IP、其他浏览器或无痕窗口各自独立、互不共享。换设备或换地址看不到这些记录，不代表数据被删除。
-          </p>
           {projects.length === 0 ? (
-            <p className="hint">当前浏览器/当前地址没有本地项目；可从下方导入 MP3 + SRT 创建第一个。</p>
+            <p className="hint">暂无最近项目。</p>
           ) : (
             <>
               <ul className="recent-list" aria-label="最近项目">

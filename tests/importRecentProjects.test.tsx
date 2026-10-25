@@ -4,7 +4,7 @@
  * - 项目入口渲染全部最近项目，按 updatedAt 倒序，不再只取 projects[0]；
  * - 每条独立显示名称、已存播放位置、更新时间，并带各自的“打开”按钮；
  * - 打开其中一个只传该项目的 projectId，另一条仍可见（不隐藏、不覆盖）；
- * - 存储边界提示与空历史文案。
+ * - 主界面保持简洁：不出现 origin/IndexedDB/设备隔离等诊断词，空状态只保留简短文案（PRD V1.0.9）。
  */
 import { IDBFactory } from "fake-indexeddb";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -110,22 +110,35 @@ describe("ImportScreen 最近项目列表（AC-052）", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("存储边界提示始终可见：IndexedDB 按 origin/浏览器隔离", async () => {
+  it("主界面不展示存储边界技术说明（V1.0.9）", async () => {
     await createProject(makeInput("tp-recent-a", "青创 一 1 7月25日"));
-    render(<ImportScreen onOpenProject={vi.fn()} />);
+    const { container } = render(<ImportScreen onOpenProject={vi.fn()} />);
     await screen.findByRole("list", { name: "最近项目" });
 
-    const notice = screen.getByText(/存储边界提示/);
-    expect(notice.textContent).toContain("IndexedDB");
-    expect(notice.textContent).toContain("localhost");
-    expect(notice.textContent).toContain("无痕");
-    expect(notice.textContent).not.toContain("已同步");
+    const text = container.querySelector(".import-screen")?.textContent ?? "";
+    for (const word of ["IndexedDB", "origin", "localhost", "无痕", "隔离", "同步", "数据被删除"]) {
+      expect(text).not.toContain(word);
+    }
   });
 
-  it("空历史明确显示“当前浏览器/当前地址没有本地项目”", async () => {
-    render(<ImportScreen onOpenProject={vi.fn()} />);
-    expect(await screen.findByText(/当前浏览器\/当前地址没有本地项目/)).toBeTruthy();
+  it("空历史只显示简短空状态，不出现技术诊断词", async () => {
+    const { container } = render(<ImportScreen onOpenProject={vi.fn()} />);
+    expect(await screen.findByText("暂无最近项目。")).toBeTruthy();
     expect(screen.queryByRole("list", { name: "最近项目" })).toBeNull();
+
+    const text = container.querySelector(".import-screen")?.textContent ?? "";
+    for (const word of [
+      "IndexedDB",
+      "origin",
+      "localhost",
+      "无痕",
+      "隔离",
+      "同步",
+      "数据被删除",
+      "当前浏览器/当前地址没有本地项目",
+    ]) {
+      expect(text).not.toContain(word);
+    }
   });
 
   it("超过 20 条默认展示 20 条，可加载更多（不丢弃其余项目）", async () => {
