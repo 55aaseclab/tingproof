@@ -2,12 +2,16 @@
   "name": "tingproof",
   "private": true,
   "version": "0.1.0",
-  "description": "听校（TingProof）V0.1 纵向样机：本地优先的长音频人工听校工作台",
+  "description": "听校（TingProof）V0.1 纵向样机：服务端共享项目空间的长音频人工听校工作台",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "serve": "node --experimental-strip-types server/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit && eslint ."

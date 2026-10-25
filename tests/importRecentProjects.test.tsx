@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * AC-052 多项目最近历史（同 origin）：
+ * AC-052 多项目最近历史（同一服务端工作空间）：
  * - 项目入口渲染全部最近项目，按 updatedAt 倒序，不再只取 projects[0]；
  * - 每条独立显示名称、已存播放位置、更新时间，并带各自的“打开”按钮；
  * - 打开其中一个只传该项目的 projectId，另一条仍可见（不隐藏、不覆盖）；
- * - 主界面保持简洁：不出现 origin/IndexedDB/设备隔离等诊断词，空状态只保留简短文案（PRD V1.0.9）。
+ * - 主界面保持简洁：不出现 origin/IndexedDB/设备隔离等诊断词，空状态只保留简短文案。
  */
 import { IDBFactory } from "fake-indexeddb";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -49,7 +49,7 @@ function makeInput(projectId: string, name: string) {
 }
 
 beforeEach(() => {
-  // 每个用例重建 IndexedDB 工厂，模拟“同一 origin 的全新浏览器存储”。
+  // 测试显式使用 IndexedDB 适配器，模拟旧客户端数据来源。
   (globalThis as { indexedDB: unknown }).indexedDB = new IDBFactory();
   resetDbForTests();
 });

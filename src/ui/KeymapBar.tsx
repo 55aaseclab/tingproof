@@ -72,7 +72,7 @@ export function KeymapBar({ keymap, onClose }: { keymap: KeymapApi; onClose: () 
         <button onClick={keymap.resetToDefaults}>恢复默认（F7 / F8 / F9）</button>
         <span className="hint" style={{ marginLeft: 8 }}>
           当前默认：{DEFAULT_KEYMAP.seekBack} 后退 · {DEFAULT_KEYMAP.playPause} 播放 ·{" "}
-          {DEFAULT_KEYMAP.seekForward} 前进；改键保存在本机浏览器。
+          {DEFAULT_KEYMAP.seekForward} 前进；快捷键偏好保存在本设备。
         </span>
       </div>
     </div>

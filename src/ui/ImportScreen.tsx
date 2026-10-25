@@ -8,6 +8,8 @@ import {
   sha256Hex,
 } from "../core/identity.js";
 import { formatDisplay } from "../core/time.js";
+import { getBackendKind } from "../store/backend.js";
+import { migrateLegacyIndexedDbProjects } from "../store/legacyMigration.js";
 import {
   createProject,
   getProject,
@@ -88,19 +90,44 @@ export function ImportScreen({ onOpenProject }: Props) {
   const [confirmedMismatch, setConfirmedMismatch] = useState(false);
   const abortRef = useRef(false);
 
+  const refreshProjects = useCallback(() => {
+    return listProjects()
+      .then((ps) => {
+        if (abortRef.current) return;
+        // 服务端工作空间内的全部项目都进入最近历史（已按 updatedAt 倒序）。
+        setProjects(ps);
+        setProjectsLoaded(true);
+      })
+      .catch((err: unknown) => {
+        if (abortRef.current) return;
+        setProjects([]);
+        setProjectsLoaded(true);
+        setError(err instanceof Error ? err.message : "暂时无法读取服务端项目列表，请检查服务是否运行。");
+      });
+  }, []);
+
   useEffect(() => {
     abortRef.current = false;
-    listProjects().then((ps) => {
-      if (abortRef.current) return;
-      // AC-052：同一 origin 下的全部项目都进入最近历史（已按 updatedAt 倒序），
-      // 不再只取第一条作为“继续上次校对”。
-      setProjects(ps);
-      setProjectsLoaded(true);
-    });
+    void refreshProjects();
     return () => {
       abortRef.current = true;
     };
-  }, []);
+  }, [refreshProjects]);
+
+  // 旧 IndexedDB 项目 → 服务端幂等迁移（仅 remote 后端；失败静默可重试，本地数据永不删除）。
+  useEffect(() => {
+    if (getBackendKind() !== "remote") return;
+    let cancelled = false;
+    migrateLegacyIndexedDbProjects()
+      .then((results) => {
+        if (cancelled || results.length === 0) return;
+        void refreshProjects();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshProjects]);
 
   const pickAudio = async () => {
     setError(null);
@@ -212,7 +239,7 @@ export function ImportScreen({ onOpenProject }: Props) {
     <div className="import-screen">
       <h1>听校 TingProof V0.1</h1>
       <div className="sub">
-        本地优先人工听校样机：导入一份 MP3 + SRT，边听边校；源文件只读，全部数据保存在本机浏览器。
+        人工听校工作台：导入一份 MP3 + SRT，边听边校；项目进度保存在当前听校服务中，源音频由本设备选择或重新定位。
       </div>
 
       {projectsLoaded && (
