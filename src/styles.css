@@ -173,6 +173,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -180,6 +181,20 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 }
 .recent-item .recent-info { min-width: 0; }
 .recent-item .recent-name { font-weight: 600; word-break: break-all; }
+.recent-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* 删除二次确认（PRD V1.1.3 / AC-066）：行内展开，占满整行，浅红底突出不可撤销后果。 */
+.delete-confirm {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--danger-weak);
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+}
+.delete-confirm .hint { margin: 0; }
+.delete-confirm-actions { display: flex; gap: 8px; }
 .kbd {
   display: inline-block;
   border: 1px solid var(--border-strong);
