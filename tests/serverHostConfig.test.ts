@@ -47,6 +47,7 @@ describe("0.0.0.0 组合服务配置", () => {
             issues: [],
           }),
         ),
+        { clientId: "ci-test-host", source: "api" },
       );
       expect(instance.store.listProjectSummaries()).toHaveLength(1);
     } finally {

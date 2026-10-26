@@ -1,22 +1,24 @@
-# 听校（TingProof）V0.1 纵向样机（第 5 轮返修版）
+# 听校（TingProof）V0.1 纵向样机（第 7 轮：主审计复验修正）
 
 由服务端项目空间承载、可从多个设备访问的长音频人工听校工作台——最小完整闭环：
 
 > 导入 MP3 + SRT → 边听边校（播放 / 变速 / 自动回退 / 循环）→ 自动保存与恢复 → 标记疑点 → 导出 SRT 并回读校验。
 
-对应 [`docs/听校_PRD_V1.0.0.md`](docs/听校_PRD_V1.0.0.md) 的 V0.1 范围（PRD 2.4：单文件纵向样机）。
+对应 [`docs/听校_PRD_V1.0.0.md`](docs/听校_PRD_V1.0.0.md) 的 V0.1 范围（PRD 2.4：单文件纵向样机；当前文档版本 V1.1.2）。
 
 产品文档均随独立仓库保存在 `docs/`：
 
-- [产品需求文档（PRD）](docs/听校_PRD_V1.0.0.md)
+- [产品需求文档（PRD，当前 V1.1.2）](docs/听校_PRD_V1.0.0.md)
 - [待确认项清单](docs/听校_待确认项清单_V1.0.0.md)
 - [Q4 版本路线图](docs/1025-Q4路线图.html)
 
-第 3–5 轮审计已全部完成并纳入本版，要点：
+第 3–7 轮审计已全部完成并纳入本版，要点：
 
 - **第 3 轮（数据与行为）**：v1→v2 数据迁移（清除遗留音频正文并补指纹）、保存协调器丢写修复、导航/重定位前强制落盘、播放速率真实恢复、暂停即时持久化、旧项目音频重连策略、界面纯白底；
 - **第 4 轮（并发与依赖）**：SaveCoordinator 并发 flush 改为 join 语义、播放→选中订阅只依赖稳定引用（纯 render 不覆盖显式选中）、周期持久化计时器不随 render 重置；
-- **第 5 轮（真实浏览器布局验收）**：≤1100px/900×900 下列表与疑点栏上下分区、互不重叠、各自独立滚动；内联 data URI favicon 消除 /favicon.ico 404。
+- **第 5 轮（真实浏览器布局验收）**：≤1100px/900×900 下列表与疑点栏上下分区、互不重叠、各自独立滚动；内联 data URI favicon 消除 /favicon.ico 404；
+- **第 6 轮（ground-truth 富审计，PRD V1.1.1）**：服务端 `audit_events` 升级为可还原人工标注过程的追加式富审计日志——结构化 before/after/changedFields/metadata、疑点与字幕段动作分类、持久非实名客户端来源、只读分页查询 API、旧 SQLite 库原地幂等迁移（PRAGMA user_version schema 版本）；本轮不做审计 UI，接口与数据库即为 ground-truth 导出通道（AC-058 至 AC-065）；
+- **第 7 轮（主审计复验修正，PRD V1.1.2）**：钉死富审计契约的精确语义并补对抗/探针回归——语义 no-op 不写对象/不增长 revision/不产生事件（含 media 分阶段补丁净 no-op，changedFields 按最终前后值一次性计算且绝不重复）、疑点 after 与返回值取数据库 canonical 行、createdAt 创建后不可变、issue_id 全局主键隔离（跨项目写入 404；导入碰撞与同一载荷内重复 issueId 均整体回滚，create_project 快照 issueCount 与主表一致）、schema 版本只进不退（未来版本拒绝打开）、数据库 open 后任意初始化失败统一释放句柄后原样重抛、损坏的非 NULL 审计 JSON 查询明确失败。
 
 逐轮明细与测试证据见 §5。
 
@@ -24,7 +26,7 @@
 
 ## 1. 环境要求
 
-- Node.js ≥ 22.13（服务端使用内置 `node:sqlite`；本轮使用 Node 24.22 验证）
+- Node.js ≥ 22.13（服务端使用内置 `node:sqlite`；本轮由主审计在 Node 24.22.1 复验）
 - Chromium 系浏览器：**Chrome / Edge / Chromium**（File System Access API：音频句柄持久化、导出回读、源文件保护；Firefox/Safari 功能可用但会退级，见 §7）
 - 服务端为项目与进度事实源；不同设备通过同一服务地址访问同一项目空间，浏览器本地数据只作缓存/迁移来源（音频仍可由各设备本地选择）
 - 界面为白色/浅色主题，状态以「颜色 + 图标 + 文字」三重表达。窄屏（≤1100px）：列表与疑点栏改为上下分区——字幕列表独立滚动，疑点栏固定可见在列表下方（限高 45%）并自带滚动，两区互不重叠（900×900 验收无横向溢出、无叠压）；favicon 为内联 SVG data URI，无网络请求。
@@ -44,12 +46,15 @@ npm run serve        # 独立生产服务（先 build），静态 dist + /api，
 
 三个服务命令都把页面和 `/api` 放在同一端口，并使用仓库内 `data/tingproof.db` 作为共享事实源。局域网设备访问 `http://<服务主机局域网 IP>:5173/`，即可看到同一份项目列表和进度。不要同时启动这些命令，也不要用 `file://` 直接打开 `dist/index.html`。
 
-### 本轮已自动化验证的结果（2026-10-25，Node 24.22）
+### 本轮已自动化验证的结果（2026-10-26，主审计复验环境 Node 24.22.1）
+
+以下 `npm run lint`（tsc + eslint）、`npm test`（32 文件 283 用例）与 `npm run build` 均由主审计在 Node 24.22.1 实际复验通过：
 
 | 命令 | 结果 |
 | --- | --- |
+| `git diff --check` | 通过（无空白错误） |
 | `npm run lint`（tsc + eslint） | 通过，0 错误 |
-| `npm test` | 30 个文件 **254 个用例全部通过**（含既有播放/编辑/疑点/确认/滚动回归，以及服务端双客户端共享、重启持久化、409 冲突、幂等迁移和 0.0.0.0 配置） |
+| `npm test` | 32 个文件 **283 个用例全部通过**（含既有播放/编辑/疑点/确认/滚动回归，服务端双客户端共享、重启持久化、409 冲突、幂等迁移和 0.0.0.0 配置，ground-truth 富审计：动作分类、before/after/changedFields、删除留痕、失败与语义 no-op 零事件（含 media 分阶段净 no-op 与 changedFields 不重复）、跨项目与载荷内重复 issueId 对抗、canonical after、createdAt 不可变、issueCount 快照一致、分页完整性、重启保留、旧 schema（旧 7 列）数据库原地无损迁移探针、未来 schema 版本拒绝、不兼容 schema 构造失败句柄零泄漏、损坏 JSON 明确失败） |
 | `npm run build` | 成功 |
 | 组合服务 | `0.0.0.0:5173` 监听通过；页面与 `/api/projects` 经 localhost 和局域网地址均返回 HTTP 200 |
 
@@ -124,15 +129,73 @@ tingproof/
 │  ├─ fileWrite.ts    pick → 写（失败 abort，不产生半份文件）→ 回读；下载降级
 │  └─ audioSource.ts  音频重定位（句柄/会话文件 + 指纹验证）
 ├─ src/store/     客户端仓库、服务端 API 适配与旧 IndexedDB 迁移适配层（生产事实源为服务端 API）
-│  ├─ remoteRepo.ts   生产/dev 服务端 API 仓库（revision/409/不可达保护）
+│  ├─ remoteRepo.ts   生产/dev 服务端 API 仓库（revision/409/不可达保护；请求携带审计来源头）
+│  ├─ clientIdentity.ts  持久非实名客户端实例 ID（localStorage；审计 clientId 来源，非真人身份）
 │  ├─ repo.ts         仓库门面（按环境选择 remote；测试/迁移显式使用 IndexedDB）
 │  ├─ idbRepo.ts      旧 IndexedDB 适配器（仅测试与迁移来源）
 │  ├─ db.ts           旧适配器连接管理（4 个 object store）
 │  ├─ saveCoordinator.ts  保存协调器（去重、防抖、失败保留队列可重试、状态可订阅）
-│  └─ types.ts        三层文稿数据模型（V0.1 实现前两层）
+│  └─ types.ts        三层文稿数据模型 + 富审计事件类型（V0.1 实现前两层）
+├─ server/        服务端（node:sqlite 单文件 + WAL）
+│  ├─ sqliteStore.ts  项目/片段/疑点/审计持久化；schema version（PRAGMA user_version）驱动的
+│  │                  原地幂等迁移；集中式 appendAudit 富审计写入（与数据/revision 同事务）
+│  ├─ apiHandler.ts   /api 路由：CRUD + revision/409 + 客户端来源校验 + 只读审计查询
+│  └─ main.ts         独立生产服务（静态 dist + /api，0.0.0.0）
 ├─ src/audio/usePlayer.ts   播放引擎（rAF 时钟、变速不变调、自动回退、A-B/整段循环）
 └─ src/ui/        导入页 / 工作台 / 片段列表 / 时间轴 / 疑点面板 / 导出对话框 / 改键面板
 ```
+
+### 服务端 API 与 ground-truth 审计（PRD V1.1.2 §4.4.6，已实现）
+
+- **写入接口**：
+  - 首次创建：`POST /api/projects`、`POST /api/projects/:id/migrate`（服务端缺失时）不携带
+    `expectedRevision`，创建成功 revision=1；
+  - 对既有项目产生实际状态变化的写操作：`PATCH /api/projects/:id/playback|media`、
+    `POST /api/projects/:id/touch`、`PATCH /api/segments/:segmentId`（及规范别名）、
+    `PUT|DELETE /api/projects/:id/issues/:issueId`（及兼容别名）、`DELETE /api/projects/:id`
+    ——均携带 `expectedRevision`/`If-Match`，成功后在事务内 revision+1 并追加富审计事件；
+  - 已定义的幂等/no-op 例外不增长 revision、不产生审计事件：幂等重复创建/迁移（同 ID 同原文）
+    返回既有项目与当前 revision；语义 no-op（segment/issue 补丁与当前持久值完全相同、media 重复
+    相同值）；对不存在对象的幂等删除（如删除已不存在的疑点，`deleted:false`）。
+- **只读审计查询**：`GET /api/projects/:projectId/audit-events?afterId=<id>&limit=<1-500>`——
+  按 id 升序稳定分页，响应含 `events` 与 `pagination.{afterId,nextAfterId,limit,hasMore}`；
+  项目不存在 404；非 GET 一律拒绝；**不存在任何修改/删除审计事件的 API**（日志只追加）。
+  查询遇**非 SQL NULL 且无法解析或类型不符**的 JSON 字段时明确失败（500，含事件 id 与字段），
+  不把损坏静默伪装成“历史未记录”；SQL NULL 旧行仍诚实返回 null。
+- **富审计事件**：每条含递增 `id`、`projectId`、写入后 `revision`、`action`、`objectType/objectId`、
+  `timestamp`、`clientId`、`source`、`before`、`after`、`changedFields`、`metadata`；
+  `before/after` 为结构化 JSON 对象或 null。动作词表：
+  - 字幕段（按实际前后差异分类，`changedFields` 准确，`originalText` 永不可改）：
+    `edit_segment_text` / `confirm_segment` / `unconfirm_segment` / `update_segment_timing` / `update_segment`；
+  - 疑点：`create_issue` / `update_issue` / `resolve_issue` / `reopen_issue` / `delete_issue`
+    （删除前完整记录保存在 `before`、`after` 为 null，删除后主表记录消失但事件仍可查询）；
+  - 项目：`create_project`（含 `metadata.origin=create|migrate`）/ `update_playback`（轻量，摘要进
+    metadata）/ `update_media`（前后快照 + changedFields）/ `touch_project` / `delete_project`。
+- **语义 no-op（V1.1.2）**：与当前持久值完全相同的 segment/issue 写入、以及分阶段补丁相互抵消后
+  净状态无变化的 media 更新（`durationMs` 阶段被 `relink` 覆盖回原值等）是成功但无变化的请求——
+  不写对象、不增长 revision、不产生审计事件，返回当前对象与当前 revision；不存在
+  `changedFields` 为空或含重复字段的空事件——media 的 changedFields 在全部补丁应用并 canonical 后
+  一次性基于最终前后值计算（白名单键序、绝不重复）。失败路径（409/400/失败写入）同样零事件、
+  零 revision。
+- **疑点精确语义（V1.1.2）**：写返回值与审计 `after` 取自数据库最终行（canonical——请求省略
+  `resolvedAt` 时持久行、返回值、审计 after 三处一致为 null）；已有疑点 `createdAt` 创建后不可变
+  （篡改请求 400 回滚，无事件/无 revision 变化）；`issues.issue_id` 为全局主键——跨项目同名疑点
+  写入返回 404 且双方数据/revision/审计零污染，导入/迁移新项目时 issueId 与既有项目碰撞或同一载荷内
+  重复 issueId 都使整个创建事务回滚（400，不 last-write-wins）；`create_project` 快照的
+  `segmentCount/issueCount` 取实际插入值，与主表 canonical 一致。
+- **客户端来源（诚实边界）**：前端每个请求携带 `X-TingProof-Client-Id`（localStorage 持久的
+  非实名客户端实例 ID，形如 `ci-<uuid>`）与 `X-TingProof-Source: web`；服务端严格校验长度/字符
+  （非法 400），缺失时诚实回退 `unknown`/`api`。**clientId 可区分客户端实例，但不代表经过认证的人**
+  ——当前无账号体系，不伪造真人身份；账号体系后置时再升级署名语义。
+- **迁移与 schema 版本**：旧 SQLite 库（audit_events 仅旧 7 列：id、project_id、revision、action、
+  object_type、object_id、at；富表 13 列 = 旧 7 列 + 新增 6 列）在打开时原地、幂等、无损迁移
+  （`ALTER TABLE ADD COLUMN` 补齐富审计列，不 drop/recreate 表、不丢旧行；旧行新列为 null 并原样
+  返回）；schema 版本记录在 `PRAGMA user_version`（当前 2），重复启动幂等，有真实旧 schema 数据库
+  探针测试锁定；`audit_events` 建 `(project_id, id)` 索引支撑升序分页。**版本只进不退**：打开数据库
+  先读 `user_version`，高于当前程序支持版本（2）时拒绝打开——版本号、表结构和数据保持不变（不降级、
+  不执行当前 schema DDL），报错提示升级程序；只有低版本才执行迁移。**构造失败释放句柄**：数据库成功
+  打开之后的任何初始化异常（读取版本、PRAGMA/SCHEMA/迁移、语句预编译——如不兼容 schema 的旧库）
+  都 best-effort 关闭句柄后原样重抛，不泄漏文件描述符。
 
 数据安全要点：
 
@@ -161,6 +224,32 @@ tingproof/
 10. **受控元数据更新**：音频时长经 `updateMediaDuration` 单独字段写回，刷新后仍可读回（有测试）；持久化路径不依赖渲染期 meta 快照（审计 P1-7：已移除 onDuration 对 metaRef 的本地改写，所有写库字段显式传入）。
 
 ## 5. 审计修复记录
+
+### 第 7 轮（主审计复验修正，PRD V1.1.2）
+
+| # | 审计项 | 修法 | 验证证据 |
+| --- | --- | --- | --- |
+| P0-1 | 跨项目 issueId 污染：`issues.issue_id` 全局主键，putIssue 对已存在但属于另一项目的同名疑点不校验，会改写他项目疑点并泄漏含其 before 的审计 | putIssue 事务内先读旧行校验项目归属，跨项目冲突 404（双方数据、revision、审计零污染）；insertProjectTx 导入 issues 前检查全局碰撞，冲突则整个新项目创建事务回滚 | `tests/auditEvents.test.ts` 跨项目对抗 2 例：p1 名义写 p2 疑点 → 404、p2 疑点/revision/审计原样、p1 零污染；导入携带碰撞 issueId → 400 且项目未创建、既有疑点未被改写 |
+| P0-2 | schema 版本倒退：migrateAuditEvents 无条件 `PRAGMA user_version=2`，未来版本（99）库会被降到 2 | 构造器先读 `user_version`：高于 `SCHEMA_VERSION` 时关闭句柄并抛错（不降级、不执行任何 DDL，版本/表/数据原样）；低版本才执行 SCHEMA 与迁移 | `tests/auditMigration.test.ts` 未来版本 1 例：99 → 构造抛错、版本仍 99、表仍旧 7 列、行数不变、句柄零泄漏（/proc/self/fd 计数）、降回 0 后可正常迁移 |
+| P0-3 | 疑点 after 非数据库最终值：请求省略 resolvedAt 时 SQL 存 NULL，但返回值与审计 after 直接用请求对象（字段缺失） | putIssue 写入后从数据库行构造 canonical IssueRecord，作为返回值与审计 after | `tests/auditEvents.test.ts` canonical 1 例：省略 resolvedAt → 返回值、审计 after、listIssues 三处 `"resolvedAt" in obj` 且为 null |
+| P0-4 | createdAt 可被静默篡改且 changedFields=[]：更新已有疑点 createdAt 10→999 会写库并产生空事件 | 已有疑点请求 createdAt 与原值不同 → 400 回滚（无写入、无事件、无 revision 变化），文档化“创建时间不可变”语义 | `tests/auditEvents.test.ts` createdAt 1 例：篡改 → 400、事件数不变、revision 不变、持久行 createdAt=10 且 note 未写入 |
+| P1-5 | 语义 no-op 污染审计：完全相同的 segment 补丁与 issue upsert 各自产生空事件并 bump revision | updateSegment/putIssue 基于 canonical 前后值判断：changedFields 为空 → 不写对象、不 bump revision、不产生审计，返回当前对象与当前 revision；原先把空事件视为正确的测试改为断言新语义 | `tests/auditEvents.test.ts` no-op 2 例（segment/issue）：重复提交 → 200、revision 不变、对象 revisionNo 不变、事件数不变；AC-063/§4.4.6/README 同步写明 |
+| P1-6 | 非 NULL 损坏审计 JSON 被 catch 后静默变 null，把损坏伪装成历史未记录 | rowToAuditEvent 严格解析：SQL NULL → null；非 NULL 且 JSON 无法解析或类型不符（对象字段收到数组/标量、数组字段收到非字符串数组）→ 抛错并带事件 id 与字段名 | `tests/auditMigration.test.ts` 损坏 JSON 1 例：三种损坏（非法 JSON/数组当 changedFields/数组当 after）均明确抛错；SQL NULL 旧行仍返回 null |
+| P2-7 | `git diff --check` 失败（待确认清单第 3 行 trailing whitespace） | 清除行尾空白，`git diff --check` 通过 | 本轮 `git diff --check` 输出为空（exit 0） |
+| P1-8 | 创建/迁移载荷内重复 issueId 静默 last-write-wins：主表只剩后一条，但 create_project.after.issueCount=2（快照与主表分裂） | insertProjectTx（create/migrate 共用路径）对同一载荷内重复 issueId 显式拒绝（400），整个创建/迁移事务回滚，不生成项目或审计；快照计数改取实际插入值 | `tests/auditEvents.test.ts` 2 例：重复 issueId → 400、项目 404、issues/segments/srt_source/audit_events 零遗留行（直接扫描临时库）；成功创建含 2 条疑点 → after.issueCount=2 且与主表一致 |
+| P1-9 | updateMedia 分阶段累加 changedFields：`{durationMs:100, relink:{durationMs:null}}` 净 no-op 却 revision+1 并产生 changedFields=["durationMs","durationMs"]、before===after 的空事件 | 保持字段应用优先级与最终语义不变；全部补丁应用并 canonical 后一次性基于最终 before/after 计算 changedFields（MEDIA_KEYS 键序，绝不重复）；净状态无变化 → 不写、不 bump、不产生审计，返回当前对象与当前 revision | `tests/auditEvents.test.ts` 1 例（两段合一）：先改后抵消 → revision 不变、持久值不变、零事件；同字段两阶段最终变化（100→relink 200）→ changedFields=["durationMs"] 只出现一次、after 与持久值一致 |
+| P1-10 | “构造失败关闭 DB 句柄”只覆盖 future-version 分支：不兼容 schema 的库（残缺 projects 表）在语句预编译时抛错，句柄泄漏（/proc/self/fd 0→1） | 构造器把 open 之后的全部初始化（读版本、PRAGMA/SCHEMA/迁移、prepare statements）包进统一 try/catch：任何异常 best-effort close 后原样重抛；future-version 分支改为只 throw，由统一 catch 关闭（无 double-close），成功构造不变 | `tests/auditMigration.test.ts` 1 例：不兼容 schema（仅残缺 projects 表 + 既有行）→ 构造抛 “no such column”、FD 计数不增加、既有表/数据不被删除；既有 future-version 测试保留不变 |
+| 口径 | 旧版 audit_events 实为 7 列（id、project_id、revision、action、object_type、object_id、at），此前文档/注释误写“6 列” | README/PRD/测试注释统一改为“旧 7 列”（富表 13 列 = 旧 7 + 新增 6，`AUDIT_EVENT_V1_1_1_COLUMNS` 的“新增 6 列”本就正确未动）；无运行逻辑改动 | `rg "6 列"` 复核：仅错误口径“旧 6 列/仅 6 列”无残留；正确的“新增 6 列”表述（指富审计新增列数）按要求保留 |
+
+### 第 6 轮（ground-truth 富审计，PRD V1.1.1）
+
+| # | 审计项 | 修法 | 验证证据 |
+| --- | --- | --- | --- |
+| 1 | `audit_events` 只有 action/object/time，无法还原人工标注过程（马上要人工标注一个文件并形成机器预筛评估的 ground truth） | 升级为追加式富审计日志：集中式 `appendAudit` 与数据写入/revision 增长同事务；新增 `client_id/source/before_json/after_json/changed_fields_json/metadata_json` 列 + `(project_id, id)` 分页索引；疑点动作分类（create/update/resolve/reopen/delete，删除前完整 before、after=null）；字幕段按实际前后差异分类（edit_segment_text/confirm_segment/unconfirm_segment/update_segment_timing/update_segment）且 changedFields 准确 | `tests/auditEvents.test.ts`（14 例）：创建/编辑/确认/撤销/疑点全生命周期的动作分类、before/after 完整 SegmentRecord/IssueRecord、originalText 不可改、删除后主表消失但 delete_issue 的 before 仍完整可查询 |
+| 2 | 无账号体系却需要区分事件来源 | 前端 `clientIdentity.ts` 持久非实名 client instance ID（localStorage，`ci-<uuid>`）+ `X-TingProof-Source: web`；服务端严格校验长度/字符（非法 400），缺失诚实回退 unknown/api；文档与实现均声明 clientId 不代表经过认证的人 | `tests/auditEvents.test.ts`：合法记录、非法 400、缺失回退、remoteRepo 生产路径自动携带 |
+| 3 | 审计数据无法被外部消费 | 只读 `GET /api/projects/:id/audit-events?afterId&limit`（1–500 严格校验，404，非 GET 拒绝，升序分页无重复无遗漏）；类型 `AuditEventRecord` 同步到共享 `src/store/types.ts`；remoteRepo 提供 `listAuditEvents` 导出方法 | `tests/auditEvents.test.ts`：参数校验（0/501/非整数/负数均 400）、默认 limit=100、105 事件分页遍历、重启前后遍历结果一致 |
+| 4 | 旧 SQLite 库升级风险（丢旧审计事件/需要重建表） | `PRAGMA user_version` 显式 schema 版本（当前 2）；构造 store 时按列检查 `ALTER TABLE ADD COLUMN` 原地补齐，不 drop/recreate 表；旧行新列保持 null 并原样返回；重复启动幂等 | `tests/auditMigration.test.ts`（3 例）：真实旧 schema 数据库探针（旧 7 列 audit_events + 旧行）→ 迁移无损、旧事件可读（新列 null）、业务数据不变、新写入带完整富审计列、二次/三次启动幂等、新库直接最新 schema |
+| 5 | 失败路径可能污染审计（409/校验拒绝也记事件） | 只在成功事务内追加；幂等删除不存在疑点/media 相同值重复提交不产生事件、不增长 revision | `tests/auditEvents.test.ts`：409、未知字段 400、非法疑点 400、删除幽灵疑点、media no-op 均零事件且 revision 不变 |
 
 ### 第 5 轮（真实浏览器布局验收）
 
@@ -227,6 +316,7 @@ tingproof/
 ## 7. 已知限制 / 未达项（如实列出，无静态假 UI）
 
 - **未实现（PRD 范围外或后置）**：批量导入与配对冲突页、拆分/合并/时间轴编辑、说话人、术语表、成稿层、VAD 覆盖候选、质量闸门与签署、版本快照/撤销历史、全文搜索、增强预设（增益/EQ）、脚踏板。
+- **审计 UI 未实现（本轮明确范围外）**：富审计数据只经 `GET /api/projects/:id/audit-events` 与 SQLite 数据库提供，供 ground-truth 导出与机器预筛评估；界面不展示审计时间线。审计事件中的 `clientId` 是非实名客户端实例 ID，不代表经过认证的人。
 - **播放位置持久化**：每 5 秒、暂停时、播放设置变化时写入；崩溃时最多回退约 5 秒的播放位置（校对文本的保存窗口是 500ms 且失败可见可重试）。「返回项目页 / 重新定位」前会强制落盘，失败留在工作台。
 - **段尾暂停精度**：可见状态下由 rAF 检测（约 16ms，远优于 AC-043 的 100ms）；后台标签页 rAF 被浏览器节流，退化为 `timeupdate` 兜底（约 250ms），可能超出 100ms 口径——如实说明，不做虚假承诺。
 - **循环不跨会话恢复**：A-B/整段循环是会话内临时状态，重启后需重新按 `Ctrl+L`。
@@ -236,7 +326,7 @@ tingproof/
 - **持久化边界**：项目、SRT、校对文本、确认状态、疑点和播放进度持久化在服务端 `data/tingproof.db`；清除浏览器站点数据不会删除服务端项目。源音频不上传，服务端数据目录仍需纳入主机备份。
 - **编码**：SRT 仅支持 UTF-8 / UTF-8 BOM；检测到非 UTF-8（U+FFFD）会警告。GB18030 自动检测是 PRD 3.1.7 的后续项。
 - **旧版项目数据**：第 1 轮样机存入的音频 File 会在启动迁移中自动清除并尽量补齐指纹；正文已不可读的项目在首次重连音频时按「文件名+大小」核对，并要求用户确认建立身份（有明确提示，不静默、不锁死）。迁移为逻辑写回：Chrome 对解除引用的大 Blob 的磁盘回收可能延迟到浏览器关闭/重启（主审计方实测：旧 profile 约 96MB → 2.3MB，重启后 `navigator.storage.estimate().usage = 2,287,929` bytes，1,676 段与原始 SRT 完整，无任何 Blob 正文）；不承诺所有浏览器即时回收。
-- **测试**：自动测试覆盖 SRT 解析/序列化/往返与边界、选中/确认策略、保存协调器（含执行中入队不丢写）、导航护栏、项目身份与音频指纹、v1→v2 迁移、持久化与重启恢复、幂等导入、原始层防覆盖、导出回读与空段阻塞、源文件保护三态、播放偏好应用、真实样本只读回归。真实 <audio> 全链路与 UI 手感无自动化测试，需按 §3 手工验证。
+- **测试**：自动测试覆盖 SRT 解析/序列化/往返与边界、选中/确认策略、保存协调器（含执行中入队不丢写）、导航护栏、项目身份与音频指纹、v1→v2 迁移、持久化与重启恢复、幂等导入、原始层防覆盖、导出回读与空段阻塞、源文件保护三态、播放偏好应用、真实样本只读回归，以及服务端富审计（动作分类、before/after/changedFields、删除留痕、客户端来源、失败与语义 no-op 零事件、media 分阶段净 no-op 与 changedFields 不重复、跨项目与载荷内重复 issueId 对抗、canonical after、createdAt 不可变、issueCount 快照一致、分页与重启完整性、旧 7 列 schema 数据库原地无损迁移探针、未来 schema 版本拒绝打开、不兼容 schema 构造失败句柄零泄漏、损坏 JSON 明确失败）。真实 <audio> 全链路与 UI 手感无自动化测试，需按 §3 手工验证。
 
 ## 8. 下一轮最优先建议
 

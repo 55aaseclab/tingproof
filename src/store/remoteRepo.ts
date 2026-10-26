@@ -1,6 +1,8 @@
 /**
- * 服务端 API 仓库（PRD V1.1.0 / 4.4.4）：生产环境的事实源。
+ * 服务端 API 仓库（PRD V1.1.0 / 4.4.4 / V1.1.1 §4.4.6）：生产环境的事实源。
  * - 全部读写走同一服务的 /api；项目归属服务端工作空间，与浏览器/设备/origin 无关；
+ * - 每个请求携带持久但非实名的 client instance ID（X-TingProof-Client-Id）与明确 source
+ *   （X-TingProof-Source: web），供服务端审计记录；clientId 不代表经过认证的人；
  * - 每次写入携带 expectedRevision（来自最近一次成功读写的 revision 缓存）；
  *   409 时抛 RevisionConflictError，绝不采用服务端返回的新版本静默重试（由用户刷新/比较后重试）；
  * - 服务不可达时抛 ServerUnavailableError：调用方（SaveCoordinator）保留内存草稿与失败队列；
@@ -8,9 +10,11 @@
  */
 
 import { SourceImmutableError } from "./idbRepo.js";
+import { getClientInstanceId } from "./clientIdentity.js";
 import type { TingProofRepository } from "./backend.js";
 import type { CreateProjectInput } from "./idbRepo.js";
 import type {
+  AuditEventRecord,
   IssueRecord,
   MediaInfo,
   PlaybackState,
@@ -20,6 +24,9 @@ import type {
 } from "./types.js";
 
 export type { CreateProjectInput };
+
+/** 请求来源标识（写入审计事件的 source 字段）。 */
+export const CLIENT_SOURCE = "web";
 
 export class RevisionConflictError extends Error {
   constructor(
@@ -116,7 +123,12 @@ export class RemoteProjectRepository implements TingProofRepository {
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
         method: init.method ?? "GET",
-        headers: init.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+        headers: {
+          ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
+          // 审计来源（V1.1.1）：持久非实名客户端实例 ID + 明确 source；服务端记录入审计事件。
+          "X-TingProof-Client-Id": getClientInstanceId(),
+          "X-TingProof-Source": CLIENT_SOURCE,
+        },
         body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
       });
     } catch (err) {
@@ -254,6 +266,27 @@ export class RemoteProjectRepository implements TingProofRepository {
       "读取原始字幕失败",
     );
     return { ...body.srtSource, projectId };
+  }
+
+  /**
+   * 只读审计事件查询（PRD V1.1.1 §4.4.6 三）：按 id 升序分页读取富审计事件，
+   * 供 ground-truth 导出与机器预筛评估使用；不提供任何修改/删除审计事件的方法。
+   */
+  async listAuditEvents(
+    projectId: string,
+    opts: { afterId?: number; limit?: number } = {},
+  ): Promise<{
+    events: AuditEventRecord[];
+    pagination: { afterId: number; nextAfterId: number; limit: number; hasMore: boolean };
+  }> {
+    const params = new URLSearchParams();
+    if (opts.afterId !== undefined) params.set("afterId", String(opts.afterId));
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    const result = await this.request(
+      `/projects/${encodeURIComponent(projectId)}/audit-events${qs.length > 0 ? `?${qs}` : ""}`,
+    );
+    return await this.mustOk(result, "读取审计事件失败");
   }
 
   // ---------- 写入（全部带 expectedRevision） ----------

@@ -118,3 +118,30 @@ export interface SrtSourceRecord {
   cueCount: number;
   importedAt: number;
 }
+
+/**
+ * ground-truth 富审计事件（PRD V1.1.1 §4.4.6，当前实现范围）：
+ * - 由一次成功的服务端写入在同一事务内追加；失败/校验拒绝/409 不产生事件；
+ * - before/after 是结构化 JSON 对象或 null（删除动作 before 完整、after=null）；
+ * - clientId 是持久但非实名的客户端实例 ID，不代表经过认证的人；
+ *   旧库迁移前的历史行在新字段上为 null（诚实表达“当时未记录”）。
+ */
+export interface AuditEventRecord {
+  /** 单调递增事件序号（升序分页游标）。 */
+  id: number;
+  projectId: string;
+  /** 本次写入后的项目 revision。 */
+  revision: number;
+  action: string;
+  objectType: string;
+  objectId: string;
+  /** epoch 毫秒时间戳。 */
+  timestamp: number;
+  clientId: string | null;
+  source: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  /** 实际发生变化字段名列表；创建/删除动作为 null。 */
+  changedFields: string[] | null;
+  metadata: Record<string, unknown> | null;
+}

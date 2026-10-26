@@ -1,7 +1,7 @@
 # 听校（TingProof）产品需求文档（PRD）
 
-版本号：V1.1.0
-文档状态：架构修订评审稿（服务端项目空间为跨设备唯一事实源；主界面不展示存储实现细节）
+版本号：V1.1.2
+文档状态：架构修订评审稿（服务端项目空间为跨设备唯一事实源；富审计日志为当前实现范围；主界面不展示存储实现细节）
 产品工作名：听校（TingProof）  
 创建日期：2026-10-25
 
@@ -18,6 +18,8 @@
 | V1.0.8 | 2026-10-25 | Codex | 根据真实试用确认：浏览器 origin/设备之间不会共享本地历史；项目页必须展示多个最近项目而不是单一“继续上次校对”槽位；新增跨设备边界说明、AC-052/AC-053 与恢复路径 |
 | V1.0.9 | 2026-10-25 | Codex | 根据真实试用反馈：主界面不再展示 origin、IndexedDB、设备隔离等技术说明；历史列表与空状态保持简洁；存储边界仅作为内部技术约束和后续方案依据 |
 | V1.1.0 | 2026-10-25 | Codex | 根据跨设备使用纠正：同一服务端项目空间成为唯一事实源；设备、浏览器和 origin 仅是访问入口；新增服务端持久化、旧 IndexedDB 幂等迁移、版本冲突保护及双客户端验收 |
+| V1.1.1 | 2026-10-26 | Codex | 把服务端 audit_events 增强为可还原人工标注过程的追加式富审计日志：结构化 before/after/changedFields/metadata、疑点与字幕段动作分类、非实名客户端来源、只读分页查询 API、旧 SQLite 库原地幂等迁移与显式 schema version；新增 AC-058 至 AC-065（本节为当前实现范围，不是未来空想） |
+| V1.1.2 | 2026-10-26 | Codex | 主审计复核修正 V1.1.1 契约的精确语义并全部实现：成功但无变化的幂等请求（segment/issue no-op、media 分阶段补丁净 no-op）不写对象、不增长 revision、不产生审计，media changedFields 按最终前后值一次性计算且绝不重复；疑点事件 after 与写返回值取数据库 canonical 行（省略 resolvedAt 时为 null）；已有疑点 createdAt 不可变（篡改 400 回滚）；issue_id 全局唯一（跨项目写入 404、导入碰撞与同一载荷内重复 issueId 均整体回滚，create_project 快照 issueCount 与主表一致）；高于当前程序的 schema version 拒绝打开（不降级、不改表），数据库 open 后任何初始化异常统一释放句柄后原样重抛；损坏的非 NULL 审计 JSON 使查询明确失败而非静默置 null |
 
 > **V1.0.2 修订边界：**本次只冻结逐段播放与鼠标选段交互，尤其明确行内按钮是播放/暂停切换而不是“每次都从头播放”。默认快捷键暂时沿用 V1.0.0，待“浏览器与桌面端使用同一套快捷键”的冲突验证完成后另行修订；在此之前不得借本次实现擅自调整快捷键。
 
@@ -32,6 +34,10 @@
 > **V1.0.7 修订边界：**根据真实用户验收，恢复两个行内复听控件，但不恢复底部重复工具栏入口。每条字幕行的操作顺序固定为“播放/暂停 → 后退 2 秒 → 前进 2 秒 → 确认/取消确认 → 疑点 → 循环”。行内后退/前进与 F7/F9 共用同一段内钳制逻辑；点击行内复听控件先使按钮所在段成为当前活动段，暂停时只定位不自动播放，播放中保持播放并在当前段范围内 seek。页面继续使用白色底。
 
 > **V1.1.0 修订边界：**项目归属于服务端工作空间，不归属于浏览器、设备或 origin。凡访问同一个服务地址的客户端，都必须从同一份服务端持久化项目列表、文本、确认状态、疑点、播放进度和项目版本读取数据；浏览器 IndexedDB 只能作为缓存或待迁移的旧数据来源，不能决定项目是否存在。`0.0.0.0` 只负责让同一个服务可被局域网访问，真正的共享来自服务端 API 与持久化数据库。主界面继续保持简洁，不展示 origin、IndexedDB 或设备隔离诊断；音频正文仍可由每台设备本地选择或重新定位，不能假设浏览器自动拥有另一台设备的 MP3。
+
+> **V1.1.1 修订边界（ground-truth 审计契约，当前实现范围）：**本版把既有只有 `action/object/time` 的服务端 `audit_events` 增强为可还原人工标注过程的追加式（append-only）富审计日志，用于马上进行的人工标注与后续机器预筛评估的 ground truth。范围与边界：一、契约细节见 §4.4.6；二、疑点动作必须区分 `create_issue / update_issue / resolve_issue / reopen_issue / delete_issue`，删除前完整记录保存在 `before`，`after` 为 null；三、字幕段动作按实际前后差异分类为 `edit_segment_text / confirm_segment / unconfirm_segment / update_segment_timing / update_segment`，`changedFields` 必须准确，`originalText` 继续不可改；四、当前没有账号体系，不伪造真人身份：客户端携带持久但非实名的 client instance ID 与明确 source，`clientId` 可区分客户端实例但不代表经过认证的人；五、只提供只读查询 API `GET /api/projects/:projectId/audit-events`，不提供修改或删除审计事件的 API；六、旧 SQLite 数据库原地、幂等、无损迁移，不 drop/recreate 表、不丢旧事件；七、本轮不要求审计 UI，接口与数据库供后续 ground-truth 导出使用。除审计能力外，播放、编辑、疑点、跨设备与 revision/409 语义全部保持不变。
+
+> **V1.1.2 修订边界（审计契约精确语义，主审计复核）：**本版不新增范围，只把 V1.1.1 契约中含混的语义钉死并实现：一、**语义 no-op**：与当前持久值完全相同的 segment/issue 写入、以及分阶段补丁相互抵消后净状态无变化的 media 更新，都是成功但无变化的请求——不写对象、不增长 revision、不产生审计事件，返回当前对象与当前 revision；media 的 changedFields 在全部补丁应用并 canonical 后一次性基于最终前后值计算，顺序稳定且绝不重复；二、**canonical after**：疑点写接口返回值与审计 `after` 一律取自数据库最终行（如请求省略 `resolvedAt` 时，持久行、返回值、审计 after 三处一致为 null），不得暴露请求原对象；三、**createdAt 不可变**：已有疑点的 `createdAt` 是创建时间，更新请求与其不一致时 400 回滚（无写入、无事件、无 revision 变化）；四、**issue_id 全局隔离**：`issues.issue_id` 为全局主键，写入前必须校验既有同名疑点的项目归属，跨项目冲突返回 404 且双方数据、revision、审计零污染；导入/迁移新项目时与既有项目 issueId 碰撞、或同一载荷内重复 issueId，都使整个创建事务回滚，`create_project` 快照计数取实际插入值、与主表一致；五、**schema 版本只进不退**：数据库 `user_version` 高于当前程序支持版本时拒绝打开（保持版本、表和数据不变，不降级、不执行当前 schema DDL，释放句柄并明确报错）；数据库打开后任何初始化异常（读取版本、PRAGMA/SCHEMA/迁移、语句预编译等）同样统一释放句柄后原样重抛；六、**损坏即失败**：审计查询遇到非 SQL NULL 且无法解析或类型不符的 JSON 字段时明确失败并暴露数据损坏，不得静默伪装成“历史未记录”。
 
 > **数据安全边界：**服务端写入必须携带项目版本（`revision`/`If-Match`/`expectedRevision` 之一）；版本过期返回冲突，不允许后写入静默覆盖前一台设备的校对稿。服务不可用时保留当前内存草稿和待提交队列，不切换到另一份“本地历史”冒充已同步数据。旧浏览器 IndexedDB 数据迁移必须幂等、可重试、成功前不删除原数据，也不上传 MP3 正文。
 
@@ -534,6 +540,7 @@ flowchart TD
 | 项目 | 文件/时长/字幕段/疑点进度 | P0 | V0.5 | 可预测剩余工作 |
 | 搜索 | 跨层全文搜索与定位播放 | P0 | V0.5 | 专名复核 |
 | 数据 | 自动保存、崩溃恢复、版本快照 | P0 | V1.0 | RPO ≤ 5 秒 |
+| 数据 | ground-truth 富审计事件与只读查询 API | P0 | V0.1 | 追加式富审计日志（§4.4.6）：动作分类、before/after/changedFields、非实名客户端来源、升序分页查询；供人工标注 ground truth 与机器预筛评估 |
 | 导出 | SRT、TXT、Markdown、JSON | P0 | V1.0 | 默认新文件 |
 | 导出 | “环境画卷”来源格式适配 | P0 | V1.0 | 文件名 + 毫秒时间范围 |
 | 协作 | 审阅包与评论 | P1 | V1.1 | 无需上传音频也可交接 |
@@ -1806,20 +1813,49 @@ flowchart TD
 
 ### 3.8.8 数据字典
 
-#### AuditEvent
+#### AuditEvent（V1.1.1 实现口径：服务端 SQLite `audit_events` 表，追加式富审计日志）
+
+每条事件由一次成功的服务端写入在同一事务内产生（数据写入、revision 增长与审计写入原子提交）；失败、校验拒绝与 409 冲突不产生事件。
 
 | 字段名 | 类型 | 必填 | 说明 | 示例值 |
 | --- | --- | --- | --- | --- |
-| event_id | UUID | 是 | 审计事件 | 15bb… |
+| id | Int64 自增 | 是 | 单调递增事件序号（分页游标） | 183 |
 | project_id | UUID | 是 | 项目 | 8d3d… |
-| project_revision | Int | 是 | 提交后的全局版本 | 183 |
-| action | String(64) | 是 | 动作 | segment.text.update |
-| object_type | String(32) | 是 | 对象类型 | segment |
+| revision | Int | 是 | 本次写入后的项目全局版本 | 184 |
+| action | String(64) | 是 | 动作分类，见 §4.4.6 词表 | confirm_segment |
+| object_type | String(32) | 是 | 对象类型：project / segment / issue | segment |
 | object_id | UUID | 是 | 对象 | c887… |
-| before_json | JSON | 否 | 变更前 | {corrected_text:“…”} |
-| after_json | JSON | 否 | 变更后 | {corrected_text:“…”} |
-| actor_role | Enum | 是 | 动作身份 | proofreader |
-| created_at | DateTime | 是 | 时间 | 2026-10-25T14:32:05.422+01:00 |
+| at | DateTime(epoch ms) | 是 | 时间 | 2026-10-26T14:32:05.422+01:00 |
+| client_id | String(80) | 是* | 客户端实例 ID（持久、非实名）；缺失请求诚实回退 `unknown`；旧迁移行可为 null | ci-1f0e… |
+| source | String(32) | 是* | 请求来源（如 `web`）；缺失回退 `api`；旧迁移行可为 null | web |
+| before_json | JSON | 否 | 变更前完整对象快照（删除动作必填）；结构化对象，不是字符串 | {correctedText:"…"} |
+| after_json | JSON | 否 | 变更后完整对象快照（删除动作为 null） | {correctedText:"…"} |
+| changed_fields_json | JSON Array | 否 | 实际发生变化字段名列表（创建/删除为 null） | ["correctedText"] |
+| metadata_json | JSON | 否 | 附加信息（如迁移来源、播放位置摘要） | {origin:"migrate"} |
+
+\* 新事件必填；V1.1.1 之前产生的旧行在新增列上允许 null，读取时原样返回 null（诚实表达“当时未记录”），不虚构默认值。
+
+**动作词表（V1.1.1 已实现）**
+
+| objectType | action | 触发条件 | before / after |
+| --- | --- | --- | --- |
+| project | create_project | 项目创建（含幂等迁移创建，metadata.origin=migrate） | null / 项目快照 |
+| project | update_playback | 播放位置/设置更新（约每 5 秒，轻量事件） | null / null（摘要进 metadata） |
+| project | update_media | 受控媒体元数据更新（时长/重定位） | 旧 media / 新 media |
+| project | touch_project | 仅刷新 updated_at | null / null |
+| project | delete_project | 项目删除 | 项目摘要 / null |
+| segment | edit_segment_text | 仅正文（correctedText）实际变化 | 完整 SegmentRecord 前后 |
+| segment | confirm_segment | 仅状态变化且目标为 confirmed | 完整 SegmentRecord 前后 |
+| segment | unconfirm_segment | 仅状态变化且来源为 confirmed | 完整 SegmentRecord 前后 |
+| segment | update_segment_timing | 仅 startMs/endMs 实际变化 | 完整 SegmentRecord 前后 |
+| segment | update_segment | 一次请求实际改变多类字段（含未命名单一类别的状态迁移）；与当前持久值完全相同的请求为 no-op，不产生事件 | 完整 SegmentRecord 前后，changedFields 准确列出 |
+| issue | create_issue | 疑点首次写入 | null / 完整 IssueRecord |
+| issue | update_issue | 已有疑点内容变化（非状态翻转） | 完整 IssueRecord 前后 |
+| issue | resolve_issue | open → resolved | 完整 IssueRecord 前后 |
+| issue | reopen_issue | resolved → open | 完整 IssueRecord 前后 |
+| issue | delete_issue | 疑点删除（主表记录消失） | 完整 IssueRecord / null |
+
+事件与返回值的 canonical 口径（V1.1.2）：疑点写接口返回值与审计 `after` 取自数据库最终行；已有疑点 `createdAt` 不可变（不一致请求 400 回滚）；`issue_id` 全局唯一，跨项目写入 404、导入碰撞整体回滚。
 
 #### Snapshot
 
@@ -2118,7 +2154,7 @@ erDiagram
 | ManuscriptParagraph | section_id + order_key；status |
 | SourceLink | paragraph_id；media_id + start_ms |
 | QualityFinding | project_id + status + severity；object_type + object_id |
-| AuditEvent | project_id + project_revision；object_type + object_id |
+| AuditEvent | project_id + id（升序分页游标）；project_id + project_revision；object_type + object_id |
 | SearchDocument | 全文索引 normalized_text；project_id + object_type |
 
 ### 4.4.4 服务端 API 与并发契约
@@ -2134,14 +2170,16 @@ erDiagram
 | PATCH | `/api/projects/:projectId/segments/:segmentId` | 更新校对文本、时间轴、确认状态，携带 `expectedRevision` |
 | PUT/DELETE | `/api/projects/:projectId/issues/:issueId` | 创建、更新或删除疑点，携带 `expectedRevision` |
 | POST | `/api/projects/:projectId/migrate` | 幂等迁移旧客户端项目；服务端已有版本不被本地旧稿覆盖 |
+| GET | `/api/projects/:projectId/audit-events` | 只读审计事件查询（V1.1.1）：按 id 升序稳定分页，支持 `afterId` 与 `limit`；不提供任何修改/删除审计事件的 API（§4.4.6） |
 
 写入约定：
 
-1. 成功写入以事务方式更新数据、`revision` 和 `updated_at`，返回新 revision 及受影响对象。
+1. 成功写入以事务方式更新数据、`revision` 和 `updated_at`，返回新 revision 及受影响对象。精确口径（V1.1.2）：首次创建 revision=1（不携带 `expectedRevision`）；“成功写入”指对既有项目产生实际状态变化的写操作——已定义的幂等/no-op 例外（幂等重复创建/迁移返回既有 revision、与当前持久值完全相同的 segment/issue 写入返回当前 revision、对不存在对象的幂等删除）不增长 revision，见 §4.4.6 一.2。
 2. 缺少或不匹配 `expectedRevision` 返回 `409 Conflict`，响应包含服务端当前 revision 和可重新读取的对象摘要；不得返回 2xx 假装已保存。
 3. 客户端可发送 `If-Match: "<revision>"`，服务端应与 `expectedRevision` 等价处理。
 4. 所有写入接口必须校验 project/segment/issue 所属关系、字段范围和请求体大小；未知字段不得静默落库。
 5. 服务重启后数据和 revision 不丢失；数据库文件、WAL 和备份目录不由浏览器访问。
+6. 客户端写入请求应携带 `X-TingProof-Client-Id`（持久非实名客户端实例 ID）与 `X-TingProof-Source`（来源标识）请求头；服务端严格校验长度与字符集并记入审计事件，缺失时诚实回退 `unknown` / `api`（V1.1.1，见 §4.4.6）。
 
 ### 4.4.5 生命周期
 
@@ -2150,11 +2188,44 @@ erDiagram
 | 源文件引用与哈希 | 项目生命周期 | 删除项目时移除引用，不删除源文件 |
 | 原始识别副本 | 项目生命周期 | 随项目恢复包保留 |
 | 校对稿、成稿、疑点、术语 | 项目生命周期 | 软删除，回收站默认 30 天 |
-| 审计事件 | 长期 | 仅完整删除项目时移除 |
+| 审计事件 | 长期（V1.1.2 实现口径） | 完整删除项目后审计行仍在数据库中保留；产品 API 不提供任何审计删除入口；项目删除后该项目审计查询 API 返回 404（见 §4.4.6 四.4） |
 | 自动快照 | 最近 30 份 + 每日最后一份 90 天 | 后台按策略清理 |
 | 手动/签署快照 | 长期 | 用户二次确认删除 |
 | 音频分析缓存 | 可重建 | 用户随时清理，源哈希变化自动失效 |
 | 本地匿名统计 | 180 天 | 设置中一键清除 |
+
+### 4.4.6 ground-truth 审计契约（V1.1.1，当前实现范围）
+
+本节描述的能力**已经实现并通过自动化测试**，不是未来规划。目的：把一次真实的人工标注过程（听、改、确认、存疑、解决、删除）完整还原为可机读的时间线，作为马上进行的人工标注与后续机器预筛评估的 ground truth。
+
+**一、事件结构与产生时机**
+
+1. 每次成功的服务端写入在同一事务内追加一条审计事件；数据写入、revision 增长与审计写入原子提交，任何一方失败则全部回滚。
+2. 失败写入、校验拒绝（400）与版本冲突（409）**不产生**审计事件；对不存在对象的幂等删除（如删除已不存在的疑点）也不产生事件、不增长 revision。**语义 no-op（V1.1.2）**：与当前持久值完全相同的 segment/issue 写入、以及分阶段补丁相互抵消后净状态无变化的 media 更新（均基于 canonical 前后值判断，`changedFields` 为空）同样是成功但无变化的请求——不写对象、不增长 revision、不产生审计事件，返回当前对象与当前 revision。media 的 `changedFields` 在全部补丁应用并 canonical 后一次性基于最终前后值计算，按白名单键序稳定排列且绝不重复。
+3. 每条事件至少包含：单调递增 `id`、`projectId`、写入后 `revision`、`action`、`objectType`、`objectId`、`timestamp`、`clientId`、`source`、`before`、`after`、`changedFields`、`metadata`。`before`/`after` 是结构化 JSON 对象或 null，不得以不可解析字符串暴露给 API 消费者。
+4. 动作词表与 before/after 语义见 §3.8.8：疑点区分 `create_issue / update_issue / resolve_issue / reopen_issue / delete_issue`（删除前完整 IssueRecord 保存在 `before`，`after` 为 null；解决与重开保存前后状态）；字幕段按实际前后差异区分 `edit_segment_text / confirm_segment / unconfirm_segment / update_segment_timing / update_segment`，一次请求同时改变多类字段时用 `update_segment` 且 `changedFields` 必须准确；`originalText` 永不可改。**精确语义（V1.1.2）**：疑点写接口返回值与审计 `after` 一律取自数据库最终行（canonical——请求省略 `resolvedAt` 时，持久行、返回值、审计 after 三处一致为 null）；已有疑点的 `createdAt` 创建后不可变，更新请求与其不一致时 400 回滚（无写入、无事件、无 revision 变化）；`issues.issue_id` 为全局主键，写入前必须校验既有同名疑点的项目归属——跨项目冲突返回 404，双方数据、revision 与审计零污染；导入/迁移新项目时 issueId 与既有项目碰撞、或同一载荷内重复 issueId，都使整个创建事务回滚（400，不 last-write-wins）；`create_project` 快照的 `segmentCount/issueCount` 取实际插入值，与主表 canonical 数据一致。
+5. 事件轻量边界：约每 5 秒一次的 `update_playback` 事件保持轻量（不复制大对象，摘要写入 metadata）；项目创建、media 更新等低频事件按合理方式补充快照。
+
+**二、客户端来源（诚实边界）**
+
+1. 当前没有账号体系，不伪造真人身份。前端 `RemoteProjectRepository` 为每个请求携带一个**持久但非实名**的 client instance ID（浏览器 localStorage 保存，形如 `ci-<uuid>`）与明确 source（`web`）。
+2. `clientId` 可以区分客户端实例（不同浏览器/设备/无痕窗口通常不同），但**不代表经过认证的人**；同一个人可用多个实例，一个实例也可能被多人使用。审计消费方不得把 clientId 当作署名。
+3. 服务端对两个请求头做严格校验（长度与 `[A-Za-z0-9_-]` 字符集，非法返回 400）并原样记录；缺失时使用诚实的 `unknown`（clientId）/`api`（source）回退，不编造来源。
+
+**三、只读查询 API**
+
+1. `GET /api/projects/:projectId/audit-events` 返回该项目全部审计事件，按 `id` 升序稳定分页。
+2. 查询参数：`afterId`（返回 id 严格大于该值的事件，默认 0，非负整数）与 `limit`（1–500，默认 100，超上限或非法值返回 400）。响应包含 `events`、`pagination.afterId / nextAfterId / limit / hasMore`，调用方以 `nextAfterId` 续页，遍历过程无重复、无遗漏。
+3. 项目不存在返回 404。**不提供任何修改或删除审计事件的 API**；审计日志只追加，不更新。
+4. **损坏即失败（V1.1.2）**：查询遇到非 SQL NULL 且无法解析、或类型不符合字段预期（对象字段收到数组/标量、数组字段收到非字符串数组）的 JSON 时必须明确失败并暴露数据损坏（含事件 id 与字段名），不得静默当作 null 伪装成“历史未记录”；SQL NULL 仍诚实表示迁移前未记录。
+5. 本轮不要求审计 UI；接口与数据库结构即为 ground-truth 导出通道。
+
+**四、存储与迁移（SQLite 实现口径）**
+
+1. 新建数据库直接创建最新 schema（`audit_events` 含 `client_id / source / before_json / after_json / changed_fields_json / metadata_json` 列与 `(project_id, id)` 索引）。
+2. 旧数据库（V1.1.1 之前，仅有旧 7 列——`id、project_id、revision、action、object_type、object_id、at`——的 `audit_events`）在打开时**原地、幂等、无损**迁移：以 `ALTER TABLE ADD COLUMN` 补齐新增 6 列（富表共 13 列），绝不 drop/recreate 任何表、绝不丢弃既有 `audit_events` 行；旧行在新列上保持 null 并在 API 中原样返回。
+3. 显式 schema version：使用 SQLite `PRAGMA user_version` 记录（构造 store 时读取与升级，可被自动化测试断言）；迁移可重复执行（重复启动幂等）。**版本只进不退（V1.1.2）**：打开数据库先读版本，高于当前程序支持的 `SCHEMA_VERSION` 时明确拒绝——保持版本号、表结构和数据完全不变（不降级、不先执行当前 schema DDL），报错提示升级程序；只有低于或等于当前版本才执行迁移。**构造失败释放句柄（V1.1.2）**：数据库成功打开之后的任何初始化异常（读取版本、PRAGMA/SCHEMA/迁移、语句预编译等）都以 best-effort 方式关闭数据库句柄后原样重抛，不泄漏文件描述符；成功构造行为不变。
+4. 事件随项目长期保留（§4.4.5）；项目被完整删除后其审计行仍留在数据库文件中（历史不清洗），但对应查询 API 返回 404。
 
 ## 4.5 系统集成
 
@@ -2279,6 +2350,14 @@ erDiagram
 | AC-055 | 乐观并发保护 | 设备 A/B 读取同一 revision；A 提交成功后 B 以旧 `expectedRevision` 写入，服务端返回 409 且不覆盖 A 的内容；B 的本地草稿可恢复并在刷新/比较后重试 | P0 |
 | AC-056 | 旧本地数据迁移 | 已有 IndexedDB 项目迁移到服务端时，服务端缺失项目才创建；重复迁移幂等不产生重复项目；服务端已有项目不被旧本地稿覆盖；迁移成功前不删除本地数据，失败可重试；MP3 正文不上传 | P0 |
 | AC-057 | 服务不可用保护 | API 暂时不可达时，当前内存编辑和失败队列保留；界面显示保存失败/等待恢复，不静默展示另一份本地历史为已同步；服务恢复后按 revision 重试并处理冲突 | P0 |
+| AC-058 | 富审计事件结构 | 给定任意一次成功写入，对应审计事件包含递增 id、projectId、写入后 revision、action、objectType、objectId、timestamp、clientId、source、before、after、changedFields、metadata；before/after 为结构化 JSON 对象或 null，可直接被 API 消费者解析 | P0 |
+| AC-059 | 字幕段动作分类 | 仅正文变化产生 `edit_segment_text`；仅确认产生 `confirm_segment`；仅撤销确认产生 `unconfirm_segment`；仅时间范围变化产生 `update_segment_timing`；一次请求改变多类字段产生 `update_segment` 且 changedFields 准确列出全部实际变化字段；所有 segment 事件保存变更前后完整 SegmentRecord；任何写入路径都不能改写 originalText | P0 |
+| AC-060 | 疑点动作分类与删除留痕 | 疑点首次写入产生 `create_issue`（before=null）；内容变化产生 `update_issue`；open→resolved 产生 `resolve_issue`；resolved→open 产生 `reopen_issue`；解决与重开均保存前后完整状态；删除产生 `delete_issue` 且删除前完整 IssueRecord 保存在 before、after=null；删除后主表记录消失但事件仍可查询；写返回值与审计 after 为数据库 canonical 值（请求省略 resolvedAt 时三处一致为 null）；已有疑点 createdAt 不可变（篡改请求 400 回滚且无事件/revision 变化）；issue_id 全局唯一——跨项目同名疑点写入 404 且双方零污染，导入碰撞与同一载荷内重复 issueId 均使新项目创建整体回滚（400，不 last-write-wins），create_project 快照 issueCount 与主表一致 | P0 |
+| AC-061 | 客户端来源诚实记录 | 前端请求携带持久非实名 client instance ID 与 source；服务端严格校验长度/字符并记入事件；非法请求头返回 400；缺失请求头的事件记为 unknown/api；文档与实现均声明 clientId 不代表经过认证的人 | P0 |
+| AC-062 | 审计只读查询 API | `GET /api/projects/:projectId/audit-events` 按 id 升序返回事件；`afterId` 与 `limit` 分页无重复无遗漏；limit 有上限且非法值（0、超上限、非整数、非数字）返回 400；项目不存在返回 404；非 GET 方法被拒绝；不存在任何修改/删除审计事件的 API；查询遇到非 SQL NULL 且无法解析或类型不符的 JSON 时明确失败并暴露数据损坏（含事件 id 与字段），SQL NULL 旧行仍诚实返回 null | P0 |
+| AC-063 | 失败不产生事件 | 409 版本冲突、400 校验拒绝与失败写入均不产生审计事件、不增长 revision；成功写入的数据变更、revision 增长与审计写入在同一事务内原子提交；成功但无变化的幂等请求（segment/issue 与当前持久值完全相同、media 分阶段补丁净状态无变化）不写对象、不增长 revision、不产生审计事件，返回当前对象与当前 revision；changedFields 基于最终前后值一次性计算，顺序稳定且绝不重复 | P0 |
+| AC-064 | 旧库原地无损迁移 | 用真实旧 schema 数据库构造 store 后：迁移原地进行（不 drop/recreate 表）、既有 audit_events 行全部保留且可读（新列为 null）、项目/片段/疑点数据不变、重复启动幂等、schema version 可被测试断言；新库直接为最新 schema；高于当前程序版本的数据库被拒绝打开——版本号、表结构与数据保持不变（不降级、不执行 DDL）；构造期任何初始化异常（含不兼容 schema 导致的语句预编译失败）均释放数据库句柄后原样重抛，不泄漏文件描述符 | P0 |
+| AC-065 | 重启后审计完整 | 服务重启后全部审计事件保留；以 afterId/limit 分页遍历同一项目事件，结果与重启前一致，无重复、无遗漏 | P0 |
 
 ### 5.1.3 文稿质量抽检
 
@@ -2297,7 +2376,7 @@ erDiagram
 
 V1.0 发布必须同时满足：
 
-1. AC-001 至 AC-057 中所有 P0 用例通过。
+1. AC-001 至 AC-065 中所有 P0 用例通过。
 2. 使用至少三份真实音频完成生产试用：一份清晰、一份一般、一份最困难。
 3. 连续 4 小时工作会话无崩溃、无音文漂移、无无法恢复的保存错误。
 4. 真实项目 SRT 导出往返误差为 0 ms。
@@ -2343,6 +2422,7 @@ V1.0 发布必须同时满足：
 | C6 | 待确认 | 平台顺序 | Linux → macOS → Windows |
 | C7 | 待确认 | 人工抽检阈值 | 严重错误一票退回；普通错字率千分之一 |
 | C8 | 已确认 | 跨设备方案 | 同一服务端项目空间共享项目与进度；恢复包作为备份/迁移，完整账号/RBAC/实时推送另行排期 |
+| C9 | 已确认 | ground-truth 审计边界 | V1.1.2 契约（§4.4.6）：追加式富审计事件、疑点/字幕段动作分类、非实名 clientId、只读分页查询 API、旧库原地幂等迁移（版本只进不退）、语义 no-op 不产生事件、createdAt 不可变、issue_id 全局隔离、损坏 JSON 明确失败；本轮不做审计 UI，不伪造真人身份 |
 
 ## 5.5 设计决策记录
 
@@ -2356,6 +2436,7 @@ V1.0 发布必须同时满足：
 | 漏转检测 | VAD 候选 + 人工裁决 | 仅看字幕末尾 / VAD 自动定案 | 字幕会漏转，VAD 也会误报 |
 | AI 使用 | 可选候选，不自动覆盖 | 全自动润色并发布 | 用户明确要求人工校对，准确性优先 |
 | 仓库衔接 | staging 导出 | 直接修改正式书稿 | 降低误覆盖与错误批量合并风险 |
+| 审计来源（V1.1.1） | 持久非实名 client instance ID + source 请求头 | 伪造用户名/账号体系 | 当前无账号体系；非实名实例 ID 诚实可区分客户端但不冒充认证身份，账号/RBAC 后置时再升级为真人署名 |
 
 ## 5.6 交接摘要
 
@@ -2367,3 +2448,4 @@ V1.0 发布必须同时满足：
 6. V0.1 先以一份 3 小时以上真实文件做纵向样机；V0.5 用三份不同难度音频试产；V1.0 才跑全量。
 7. 开发启动前优先确认 C2（成稿范围）、C3/C4（不可辨政策）、C6（平台顺序）；跨设备共享已按 C8 纳入当前架构。
 8. 本轮试用暴露两个独立问题：项目入口只展示 `projects[0]` 导致第二个项目不可见，以及把浏览器本地存储误当成跨设备事实源；前者由服务端多项目历史修复，后者由服务端持久化、迁移和版本保护解决。
+9. V1.1.1/V1.1.2 已实现 ground-truth 富审计契约（§4.4.6，AC-058 至 AC-065）：审计事件可还原人工标注全过程（含疑点删除前快照与字幕段动作分类），审计查询 API 只读分页；语义 no-op 不产生事件、createdAt 不可变、issue_id 全局隔离、schema 版本只进不退、损坏 JSON 明确失败；clientId 非实名，账号体系后置时需另行升级署名语义。
