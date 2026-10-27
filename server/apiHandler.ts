@@ -15,7 +15,8 @@
  *          兼容别名：DELETE /api/issues/:issueId
  * - POST   /api/projects/:id/migrate              旧 IndexedDB 项目幂等迁移（服务端已有则不覆盖）
  * - DELETE /api/projects/:id                      删除项目（expectedRevision）
- * 写入约定：缺少或不匹配 expectedRevision（或 If-Match）→ 409 + 服务端当前 revision；成功 → 事务内 revision+1。
+ * 写入约定：ground-truth 写入缺少或不匹配 expectedRevision（或 If-Match）→ 409 + 服务端当前 revision；成功 → 事务内 revision+1。
+ * 预筛 run/batch 操作性元数据是例外（§3.4.9/§4.4.4）：创建 run 不改 revision、不携带 expectedRevision。
  * 客户端来源（V1.1.1）：写入请求携带 X-TingProof-Client-Id / X-TingProof-Source 请求头，
  * 服务端严格校验长度与字符集并记入审计事件；缺失时诚实回退 unknown/api；
  * clientId 是非实名客户端实例 ID，不代表经过认证的人。审计事件只追加，无任何修改/删除 API。
@@ -23,15 +24,29 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { badRequest, HttpApiError, notFound, payloadTooLarge } from "./errors.ts";
 import {
+  envPrefilterModel,
+  getPrefilterModelConfig,
+  validatePrefilterResponse,
+  type PrefilterModel,
+  type PrefilterValidationResult,
+} from "./prefilterModel.ts";
+import {
   assertId,
   AUDIT_EVENTS_DEFAULT_LIMIT,
   AUDIT_EVENTS_MAX_LIMIT,
   SqliteProjectStore,
   type AuditClientContext,
   type CreateProjectPayload,
+  type PrefilterRunSummary,
 } from "./sqliteStore.ts";
 
 const BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+
+export interface ApiHandlerContext {
+  store: SqliteProjectStore;
+  /** 测试注入的预筛模型；缺省用服务端环境配置（OpenAI-compatible）。 */
+  prefilterModel?: PrefilterModel;
+}
 
 /** 客户端来源请求头（PRD V1.1.1 §4.4.6 二）。 */
 const CLIENT_ID_HEADER = "x-tingproof-client-id";
@@ -64,10 +79,6 @@ function clientContextOf(req: IncomingMessage): AuditClientContext {
     clientId: clientId && clientId.length > 0 ? clientId : UNKNOWN_CLIENT_ID,
     source: source && source.length > 0 ? source : API_SOURCE,
   };
-}
-
-export interface ApiHandlerContext {
-  store: SqliteProjectStore;
 }
 
 type Json = Record<string, unknown>;
@@ -135,6 +146,18 @@ function rejectUnknownFields(body: Json, allowed: readonly string[], label: stri
   const unknown = Object.keys(body).filter((k) => !allowed.includes(k) && k !== "expectedRevision");
   if (unknown.length > 0) {
     throw badRequest(`${label} 包含未知字段：${unknown.join(", ")}（未知字段不会静默落库）`);
+  }
+}
+
+/**
+ * P0-2（第 6 轮）：严格空对象校验——任何键（包括 expectedRevision）都 400。
+ * 用于预筛操作性端点（create run / next / retry / cancel）：
+ * run/batch 是操作性恢复元数据，body 只允许 {}，不接受版本化写接口的 expectedRevision。
+ */
+function rejectAnyFields(body: Json, label: string): void {
+  const keys = Object.keys(body);
+  if (keys.length > 0) {
+    throw badRequest(`${label} 只接受空对象 {}（含 expectedRevision 在内的任何字段都不被接受）`);
   }
 }
 
@@ -210,7 +233,7 @@ export function createApiMiddleware(ctx: ApiHandlerContext) {
       return;
     }
     try {
-      await route(req, res, url.pathname, url.searchParams, store);
+      await route(req, res, url.pathname, url.searchParams, store, ctx.prefilterModel);
     } catch (err) {
       if (err instanceof HttpApiError) {
         sendJson(res, err.status, { error: err.code, message: err.message, ...err.extra });
@@ -234,10 +257,28 @@ async function route(
   pathname: string,
   query: URLSearchParams,
   store: SqliteProjectStore,
+  injectedModel: PrefilterModel | undefined,
 ): Promise<void> {
   const method = (req.method ?? "GET").toUpperCase();
   const parts = pathname.split("/").filter(Boolean); // ["api", ...]
   const client = clientContextOf(req);
+
+  // ---- /api/text-prefilter/config（V1.1.4：只暴露 available/provider/model/promptVersion） ----
+  if (parts[1] === "text-prefilter" && parts.length === 3 && parts[2] === "config") {
+    if (method !== "GET") throw badRequest(`不支持的方法：${method} /api/text-prefilter/config`);
+    const model = injectedModel ?? envPrefilterModel();
+    if (model) {
+      sendJson(res, 200, {
+        available: true,
+        provider: model.provider,
+        model: model.model,
+        promptVersion: model.promptVersion,
+      });
+    } else {
+      sendJson(res, 200, getPrefilterModelConfig());
+    }
+    return;
+  }
 
   // ---- /api/projects ----
   if (parts[1] === "projects" && parts.length === 2) {
@@ -348,6 +389,31 @@ async function route(
         sendJson(res, 200, { srtSource: store.getSrtSource(projectId) });
         return;
       }
+      // ---- V1.1.4 文本预筛 run（PRD §4.4.4）----
+      // P0-3：GET 最近 run（只读发现；无 run 返回 null，不创建、不触发模型）。
+      if (sub === "text-prefilter-runs" && method === "GET") {
+        sendJson(res, 200, { run: store.getLatestPrefilterRun(projectId) });
+        return;
+      }
+      if (sub === "text-prefilter-runs" && method === "POST") {
+        // body 已由本块顶部统一读取（重复读取已消费流会挂起）。
+        rejectAnyFields(body, "预筛 run 创建载荷");
+        const model = injectedModel ?? envPrefilterModel();
+        if (!model) {
+          throw new HttpApiError(
+            503,
+            "prefilter_unavailable",
+            "机器预筛未配置：请在服务端环境设置 TINGPROOF_LLM_BASE_URL 与 TINGPROOF_LLM_MODEL（API key 只从环境变量 TINGPROOF_LLM_API_KEY 读取，不会返回给浏览器）。",
+          );
+        }
+        const { run, created } = store.createPrefilterRun(projectId, {
+          provider: model.provider,
+          model: model.model,
+          promptVersion: model.promptVersion,
+        });
+        sendJson(res, created ? 201 : 200, { run, created });
+        return;
+      }
       throw notFound(`未知子资源：${sub}`);
     }
 
@@ -359,6 +425,26 @@ async function route(
       rejectUnknownFields(body, ["patch"], "segment 载荷");
       if (typeof body.patch !== "object" || body.patch === null) throw badRequest("patch 缺失");
       const result = store.updateSegment(projectId, segmentId, body.patch as Json, expected, client);
+      sendJson(res, 200, result);
+      return;
+    }
+
+    // /api/projects/:id/segments/:segmentId/confirm（V1.1.4 原子确认，PRD §4.4.4）
+    if (parts.length === 5 && parts[3] === "segments" && parts[4] === "confirm" && method === "POST") {
+      throw notFound("缺少 segmentId（confirm 需为 /segments/:segmentId/confirm）");
+    }
+    if (parts.length === 6 && parts[3] === "segments" && parts[5] === "confirm" && method === "POST") {
+      const segmentId = assertId(parts[4], "segmentId");
+      const body = await readJsonBody(req);
+      const expected = extractExpectedRevision(body, req);
+      rejectUnknownFields(body, ["correctedText"], "confirm 载荷");
+      const result = store.confirmSegmentAndResolve(
+        projectId,
+        segmentId,
+        { correctedText: body.correctedText },
+        expected,
+        client,
+      );
       sendJson(res, 200, result);
       return;
     }
@@ -385,6 +471,53 @@ async function route(
         return;
       }
       throw badRequest(`不支持的方法：${method} /api/projects/:id/issues/:issueId`);
+    }
+
+    // /api/projects/:id/text-prefilter-runs/:runId（V1.1.4：进度/恢复查询）
+    if (parts.length === 5 && parts[3] === "text-prefilter-runs") {
+      const runId = assertId(parts[4], "runId");
+      if (method === "GET") {
+        sendJson(res, 200, { run: store.getPrefilterRun(projectId, runId) });
+        return;
+      }
+      throw badRequest(`不支持的方法：${method} /api/projects/:id/text-prefilter-runs/:runId`);
+    }
+
+    // /api/projects/:id/text-prefilter-runs/:runId/next|retry|cancel（V1.1.4）
+    if (parts.length === 6 && parts[3] === "text-prefilter-runs") {
+      const runId = assertId(parts[4], "runId");
+      const action = parts[5];
+      if (action === "next" || action === "retry") {
+        if (method !== "POST") {
+          throw badRequest(`不支持的方法：${method} /api/projects/:id/text-prefilter-runs/:runId/${action}`);
+        }
+        // P1-4（第 5 轮）：读取并校验请求体（只接受空对象；未知字段 400、超限 413）。
+        // 在校验通过前不得 claim、调模型或改变 run。
+        const actionBody = await readJsonBody(req);
+        rejectAnyFields(actionBody, `预筛 ${action} 载荷`);
+        const model = injectedModel ?? envPrefilterModel();
+        if (!model) {
+          throw new HttpApiError(
+            503,
+            "prefilter_unavailable",
+            "机器预筛未配置：请在服务端环境设置 TINGPROOF_LLM_BASE_URL 与 TINGPROOF_LLM_MODEL。",
+          );
+        }
+        const result = await processPrefilterBatch(store, model, projectId, runId, action, client);
+        sendJson(res, 200, result);
+        return;
+      }
+      if (action === "cancel") {
+        if (method !== "POST") {
+          throw badRequest(`不支持的方法：${method} /api/projects/:id/text-prefilter-runs/:runId/cancel`);
+        }
+        // P1-4（第 5 轮）：读取并校验请求体（只接受空对象）。
+        const cancelBody = await readJsonBody(req);
+        rejectAnyFields(cancelBody, "预筛 cancel 载荷");
+        sendJson(res, 200, { run: store.cancelPrefilterRun(projectId, runId) });
+        return;
+      }
+      throw notFound(`未知预筛动作：${action}`);
     }
 
     throw notFound("未知 API 路径");
@@ -423,6 +556,135 @@ async function route(
   }
 
   throw notFound(`未知 API 路径：${pathname}`);
+}
+
+/**
+ * P1-3 错误脱敏：截断长度、移除 URL/凭据/Authorization/API key 等敏感模式。
+ * 模型适配器已尽量脱敏；这里是纵深防御——任何 Error.message 入库/回传前都经过此处。
+ */
+function sanitizePrefilterError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  let message = raw.slice(0, 500);
+  // 移除常见敏感模式：完整/部分 URL、Bearer token、长随机 key。
+  message = message.replace(/https?:\/\/[^\s"']+/g, "[URL已脱敏]");
+  message = message.replace(/[Bb]earer\s+[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [已脱敏]");
+  message = message.replace(/sk-[A-Za-z0-9]{16,}/g, "sk-[已脱敏]");
+  return message;
+}
+
+/**
+ * V1.1.4 预筛批处理（PRD §4.4.4 写入约定 8）：
+ * 1. 短事务原子 claim（并发第二请求不调用模型）；2. inputHash 幂等复用（不调用模型）；
+ * 3. 模型调用不持有数据库事务；4. 返回后严格校验，再以短事务 materialize；
+ * 5. 模型/校验失败 → 批次 failed（脱敏错误），不产生 issue/revision/审计污染，可重试。
+ */
+async function processPrefilterBatch(
+  store: SqliteProjectStore,
+  model: PrefilterModel,
+  projectId: string,
+  runId: string,
+  mode: "next" | "retry",
+  client: AuditClientContext,
+): Promise<{
+  run: PrefilterRunSummary;
+  processed: boolean;
+  error: { code: string; message: string } | null;
+  revision: number;
+}> {
+  // P0-6：run 冻结的 provider/model/promptVersion 不可漂移——
+  // 服务重启或配置变更后，旧 run 不得用新模型继续处理（破坏可复现/幂等/审计）。
+  // 处理前比较当前 adapter 与 run 冻结值；任一不一致 → 不 claim、不调模型、零副作用，
+  // 返回明确的配置不匹配状态（用户显式以当前配置新建 run）。
+  const runBefore = store.getPrefilterRun(projectId, runId);
+  const configMismatch =
+    runBefore.provider !== model.provider ||
+    runBefore.model !== model.model ||
+    runBefore.promptVersion !== model.promptVersion;
+  if (configMismatch) {
+    return {
+      run: runBefore,
+      processed: false,
+      error: {
+        code: "config_mismatch",
+        message:
+          `预筛 run 创建时的模型配置（${runBefore.provider}/${runBefore.model}/${runBefore.promptVersion}）` +
+          `与当前配置（${model.provider}/${model.model}/${model.promptVersion}）不一致。` +
+          "为保持可复现与幂等，该 run 不会继续处理；请用当前配置开始新的预筛。",
+      },
+      revision: store.currentRevision(projectId),
+    };
+  }
+  const claimed = store.claimPrefilterBatch(projectId, runId, mode);
+  const modelInputs = claimed
+    ? claimed.inputs.map((i) => ({ segmentId: i.segmentId, cueNo: i.cueNo, originalText: i.originalText }))
+    : [];
+  if (!claimed) {
+    // 无可认领批次（全部成功/取消，或首个未完成批正被其他调用持有且未超租约）。
+    return {
+      run: store.getPrefilterRun(projectId, runId),
+      processed: false,
+      error: null,
+      revision: store.currentRevision(projectId),
+    };
+  }
+  // P1-3：模型/校验/复制/落库的可恢复失败统一收尾为 batch failed（结束 claim），
+  // 绝不让批次滞留 running 等租约超时；错误一律经 sanitizePrefilterError 脱敏。
+  const failBatch = (errorCode: string, err: unknown) => {
+    const message = sanitizePrefilterError(err);
+    store.markPrefilterBatchFailed(claimed.batchId, errorCode, message);
+    return {
+      run: store.getPrefilterRun(projectId, runId),
+      processed: true,
+      error: { code: errorCode, message },
+      revision: store.currentRevision(projectId),
+    };
+  };
+  // inputHash 幂等：同项目已有成功批次 → 直接复制结果，不再次调用模型、不重复收费。
+  const reusable = store.findReusableBatch(projectId, claimed.inputHash, claimed.batchId);
+  if (reusable) {
+    try {
+      store.copyBatchResults(claimed.batchId, reusable);
+    } catch (err) {
+      return failBatch("copy_error", err);
+    }
+    return {
+      run: store.getPrefilterRun(projectId, runId),
+      processed: true,
+      error: null,
+      revision: store.currentRevision(projectId),
+    };
+  }
+  // 模型调用（不持有数据库写事务）。
+  let response: unknown;
+  try {
+    response = await model.complete(modelInputs);
+  } catch (err) {
+    return failBatch("model_error", err);
+  }
+  let validated: PrefilterValidationResult;
+  try {
+    validated = validatePrefilterResponse(response, modelInputs);
+  } catch (err) {
+    return failBatch("invalid_response", err);
+  }
+  try {
+    const result = store.materializePrefilterBatch(
+      claimed.batchId,
+      validated.valid,
+      { provider: model.provider, model: model.model, promptVersion: model.promptVersion, runId },
+      client,
+      validated.rejected,
+    );
+    return {
+      run: store.getPrefilterRun(projectId, runId),
+      processed: true,
+      error: null,
+      revision: result.revision,
+    };
+  } catch (err) {
+    // materialize 失败（如项目被并发删除）：批次收尾为 failed，claim 不滞留。
+    return failBatch("materialize_error", err);
+  }
 }
 
 function parseRevisionParam(value: string | null): number | undefined {

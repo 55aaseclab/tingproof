@@ -147,13 +147,49 @@ export function IssuePanel({
                   <span className={`status-chip ${issue.severity === "blocking" ? "status-questioned" : "status-editing"}`}>
                     {SEVERITY_LABEL[issue.severity]}
                   </span>
+                  {issue.origin === "machine_prefilter" && (
+                    <span className="status-chip machine-chip">
+                      机器建议
+                      {typeof (issue.machineMetadata as Record<string, unknown> | null | undefined)?.confidence ===
+                      "string"
+                        ? ` · ${
+                            {
+                              high: "高",
+                              medium: "中",
+                              low: "低",
+                            }[(issue.machineMetadata as Record<string, unknown>).confidence as string] ?? ""
+                          }`
+                        : ""}
+                    </span>
+                  )}
                   <span>{ISSUE_TYPE_LABEL[issue.type]}</span>
                   <span className="cue-time">
                     {formatDisplay(issue.startMs)} → {formatDisplay(issue.endMs)}
                   </span>
                   <span>#{seg?.cueNo ?? "—"}</span>
                 </div>
-                {issue.note && <div className="issue-note">{issue.note}</div>}
+                {issue.origin === "machine_prefilter" && issue.machineMetadata && (
+                  <div className="machine-detail hint">
+                    <div>
+                      可疑片段：
+                      {String((issue.machineMetadata as Record<string, unknown>).suspiciousText ?? "—")}
+                    </div>
+                    {(issue.machineMetadata as Record<string, unknown>).suggestion ? (
+                      <div>
+                        建议写法：
+                        {String((issue.machineMetadata as Record<string, unknown>).suggestion)}
+                      </div>
+                    ) : null}
+                    <div>
+                      机器理由：
+                      {String((issue.machineMetadata as Record<string, unknown>).reason ?? issue.note)}
+                    </div>
+                  </div>
+                )}
+                {/* P2：机器来源 note=reason，machine-detail 已展示理由——不重复渲染。 */}
+                {issue.note && issue.origin !== "machine_prefilter" && (
+                  <div className="issue-note">{issue.note}</div>
+                )}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button onClick={() => onJumpPlay(issue.segmentId)} title="选中该段并从其段首播放">⤓ 跳转播放</button>
                   {issue.status === "open" && (

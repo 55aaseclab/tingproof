@@ -239,3 +239,76 @@ describe("SaveCoordinator", () => {
     un();
   });
 });
+
+describe("P0-1（第 6 轮）：flush 快照跳过陈旧同-label op", () => {
+  it("A 挂起期间 B-old 被替换 → A、B-new 执行，B-old 为 0", async () => {
+    const calls: string[] = [];
+    const coordinator = new SaveCoordinator(0);
+
+    let releaseA!: () => void;
+    const opA = () =>
+      new Promise<void>((resolve) => {
+        releaseA = () => {
+          calls.push("A");
+          resolve();
+        };
+      });
+    const opB_old = () => {
+      calls.push("B-old"); // 绝不应该执行
+      return Promise.resolve();
+    };
+    const opB_new = () => {
+      calls.push("B-new");
+      return Promise.resolve();
+    };
+
+    coordinator.enqueue("label:a", opA);
+    coordinator.enqueue("label:b", opB_old);
+    const flushPromise = coordinator.flush();
+
+    // A 挂起期间，B-old 被替换。
+    await new Promise((r) => setTimeout(r, 10)); // 等 flush 开始执行 A
+    coordinator.enqueue("label:b", opB_new);
+
+    // 释放 A → flush 继续执行快照里的下一个 op。
+    releaseA();
+    await flushPromise;
+
+    // B-old 被跳过（已被替换），只有 A 和 B-new 执行。
+    expect(calls).toEqual(["A", "B-new"]);
+    expect(calls).not.toContain("B-old");
+    expect(coordinator.state.state).toBe("saved");
+  });
+
+  it("正在执行中的 A 完成后新 A-new 仍继续执行（既有语义保留）", async () => {
+    const calls: string[] = [];
+    const coordinator = new SaveCoordinator(0);
+
+    let releaseA!: () => void;
+    const opA_old = () =>
+      new Promise<void>((resolve) => {
+        releaseA = () => {
+          calls.push("A-old-exec");
+          resolve();
+        };
+      });
+    const opA_new = () => {
+      calls.push("A-new-exec");
+      return Promise.resolve();
+    };
+
+    coordinator.enqueue("label:a", opA_old);
+    const flushPromise = coordinator.flush();
+
+    // A-old 正在执行中被替换。
+    await new Promise((r) => setTimeout(r, 10));
+    coordinator.enqueue("label:a", opA_new);
+
+    releaseA();
+    await flushPromise;
+
+    // A-old 已在执行（完成），A-new 也执行。
+    expect(calls).toEqual(["A-old-exec", "A-new-exec"]);
+    expect(coordinator.state.state).toBe("saved");
+  });
+});

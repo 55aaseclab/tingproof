@@ -7,8 +7,10 @@
  * - Ctrl+Enter：确认当前选中段并选择/定位/聚焦下一未校对段（语义保持）。
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
 import { Workbench } from "../src/ui/Workbench.js";
+import { resetDbForTests } from "../src/store/db.js";
 import type { IssueRecord, ProjectMeta, SegmentRecord } from "../src/store/types.js";
 
 const { TimelineSpy } = vi.hoisted(() => ({
@@ -21,6 +23,35 @@ vi.mock("../src/ui/Timeline.js", async () => {
 });
 
 afterEach(() => cleanup());
+
+beforeEach(() => {
+  // V1.1.4 原子确认经真实持久层：每个用例用全新 IndexedDB（与 props 同 segmentId 播种）。
+  (globalThis as { indexedDB: unknown }).indexedDB = new IDBFactory();
+  resetDbForTests();
+});
+
+/** 与 props 相同 segmentId 播种 IndexedDB（否则原子确认无法命中持久层）。 */
+async function seedProject(segments: SegmentRecord[]) {
+  const { createProject } = await import("../src/store/repo.js");
+  await createProject({
+    meta: makeMeta(),
+    srtSource: {
+      rawContent: "seed",
+      sha256: "x", // 与 makeMeta().media.srtSha256 一致
+      sourceFilename: "a.srt",
+      cueCount: segments.length,
+    },
+    segments: segments.map((s) => ({
+      segmentId: s.segmentId,
+      cueNo: null,
+      startMs: s.startMs,
+      endMs: s.endMs,
+      originalText: s.originalText,
+      correctedText: s.correctedText,
+      status: s.status,
+    })),
+  });
+}
 
 beforeAll(() => {
   // jsdom 媒体/滚动桩。
@@ -108,12 +139,16 @@ function expectActive(id: string) {
 }
 
 describe("Workbench 行内确认 / Ctrl+Enter（第 10 轮审计）", () => {
-  it("点击非当前行 B 的确认：B 被确认且 active=B；A 保持未校对；不自动播放、播放头在 B 段首", () => {
+  it("点击非当前行 B 的确认：B 被确认且 active=B；A 保持未校对；不自动播放、播放头在 B 段首", async () => {
+    await seedProject(SEGMENTS);
     const { row, confirmBtn } = renderWorkbench();
     expectActive("seg-a"); // 初始选中第一段
     fireEvent.click(confirmBtn("seg-b"));
-    // B 被确认，按钮切换为「取消确认」。
-    expect(within(row("seg-b")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    // V1.1.4 原子确认：状态在服务端事务成功后更新（含自动解决本段 open 疑点）。
+    await waitFor(() => {
+      // B 被确认，按钮切换为「取消确认」。
+      expect(within(row("seg-b")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    });
     // active 切换为按钮所在行 B，而不是 A、也不是下一行 C。
     expectActive("seg-b");
     // 不自动播放；播放头保持原位（PRD 90a17ac：确认按钮不是定位按钮，不 seek 到 B.startMs）。
@@ -193,10 +228,17 @@ describe("Workbench 行内确认 / Ctrl+Enter（第 10 轮审计）", () => {
   });
 
   it("Ctrl+Enter：确认当前选中段并选择/定位/聚焦下一未校对段（语义保持）", async () => {
+    await seedProject(SEGMENTS);
     const { row, confirmBtn } = renderWorkbench();
     // 先用行内确认选中 B（B 确认后取消，制造「选中 B、未确认」的状态）。
     fireEvent.click(confirmBtn("seg-b"));
+    await waitFor(() => {
+      expect(within(row("seg-b")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    });
     fireEvent.click(within(row("seg-b")).getByRole("button", { name: "取消确认" }));
+    await waitFor(() => {
+      expect(within(row("seg-b")).getByRole("button", { name: "确认本段" })).toBeTruthy();
+    });
     // Ctrl+Enter：确认 B（当前选中段）并前进到 C。
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
     await waitFor(() => {
@@ -210,10 +252,75 @@ describe("Workbench 行内确认 / Ctrl+Enter（第 10 轮审计）", () => {
     });
     expect(screen.getAllByRole("button", { name: "取消确认" })).toHaveLength(1); // 仅 B 被确认
   });
+
+  it("V1.1.4 原子确认自动解决本段 open 疑点：未解决计数立即消失、疑点保持已解决不删除（AC-068）", async () => {
+    await seedProject(SEGMENTS);
+    const segB = SEGMENTS[1];
+    const issues: IssueRecord[] = [
+      {
+        issueId: "issue-w1",
+        projectId: "tp-t",
+        segmentId: segB.segmentId,
+        startMs: segB.startMs,
+        endMs: segB.endMs,
+        type: "proper_noun",
+        severity: "blocking",
+        note: "专名待查",
+        status: "open",
+        createdAt: 5,
+        resolvedAt: null,
+      },
+      {
+        issueId: "issue-w2",
+        projectId: "tp-t",
+        segmentId: segB.segmentId,
+        startMs: segB.startMs,
+        endMs: segB.endMs,
+        type: "number",
+        severity: "warning",
+        note: "数字待核",
+        status: "open",
+        createdAt: 6,
+        resolvedAt: null,
+      },
+    ];
+    // 疑点同样播种到 IndexedDB（原子确认在持久层解决本段 open 疑点）。
+    const { upsertIssue } = await import("../src/store/repo.js");
+    for (const issue of issues) await upsertIssue(issue);
+    const { row, confirmBtn } = renderWorkbench(SEGMENTS, issues);
+    // 确认前：B 行显示未解决计数 ×2，右侧面板可见两条 open。
+    expect(within(row("seg-b")).getByText("⚑ 疑点 ×2")).toBeTruthy();
+    expect(screen.getAllByText(/专名待查|数字待核/)).toHaveLength(2);
+
+    fireEvent.click(confirmBtn("seg-b"));
+    await waitFor(() => {
+      expect(within(row("seg-b")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    });
+    // 未解决计数立即消失；右侧“只看未解决”不再显示这两条。
+    expect(within(row("seg-b")).queryByText(/⚑ 疑点 ×/)).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByText(/专名待查|数字待核/)).toBeNull();
+    });
+
+    // 撤销确认：只回段状态，不重开疑点（面板仍无 open）。
+    fireEvent.click(within(row("seg-b")).getByRole("button", { name: "取消确认" }));
+    await waitFor(() => {
+      expect(within(row("seg-b")).getByRole("button", { name: "确认本段" })).toBeTruthy();
+    });
+    expect(within(row("seg-b")).queryByText(/⚑ 疑点 ×/)).toBeNull();
+    expect(screen.queryByText(/专名待查|数字待核/)).toBeNull();
+
+    // 持久层：两条疑点 resolved（不删除）。
+    const { getProjectIssues } = await import("../src/store/repo.js");
+    const stored = await getProjectIssues("tp-t");
+    expect(stored.filter((i) => i.status === "resolved")).toHaveLength(2);
+    expect(stored.filter((i) => i.status === "open")).toHaveLength(0);
+  });
 });
 
 describe("Workbench 渲染范围（第 11 轮审计 1：真实回调链）", () => {
-  it("经真实回调链连续编辑中间行：草稿管道下所有行零重渲染（AC-048）", () => {
+  it("经真实回调链连续编辑中间行：草稿管道下所有行零重渲染（AC-048）", async () => {
+    await seedProject(SEGMENTS);
     const probe = vi.fn();
     renderWorkbench(undefined, undefined, (id) => probe(id));
     const countFor = (id: string) => probe.mock.calls.filter(([x]) => x === id).length;
@@ -238,6 +345,9 @@ describe("Workbench 渲染范围（第 11 轮审计 1：真实回调链）", () 
     expect(within(rowB("seg-b")).getByText("✎ 校对中")).toBeTruthy();
     // 行内确认 C（选中从 A 切到 C）：仅选中相关的行（A、C）各重渲染一次，B 不受影响。
     fireEvent.click(within(rowB("seg-c")).getByRole("button", { name: "确认本段" }));
+    await waitFor(() => {
+      expect(within(rowB("seg-c")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    });
     const c2 = ids.map(countFor);
     expect(c2[1]).toBe(c1[1]); // 中间行 B 不因 C 的确认而重渲染
     expect(c2[0]).toBe(c1[0] + 1); // A：selected true→false（高亮变化，合法）
@@ -248,6 +358,10 @@ describe("Workbench 渲染范围（第 11 轮审计 1：真实回调链）", () 
     const lastTimelineCall = () => TimelineSpy.mock.calls.length;
     const beforeConfirmA = lastTimelineCall();
     fireEvent.click(within(rowB("seg-a")).getByRole("button", { name: "确认本段" }));
+    await waitFor(() => {
+      expect(within(rowB("seg-a")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    });
+    expect(lastTimelineCall()).toBeGreaterThan(beforeConfirmA);
     expect(lastTimelineCall()).toBeGreaterThan(beforeConfirmA);
     // 2) 纯正文编辑（B 为 editing 状态，status 不变 → timelineData 引用不变）→ 不重渲染。
     const timelineBaseline = lastTimelineCall();

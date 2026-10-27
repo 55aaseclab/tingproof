@@ -19,6 +19,17 @@ export interface SaveOp {
   run: () => Promise<void>;
 }
 
+/**
+ * P0-2（第 5 轮）：入队结果——不可伪造的 op identity token + 条件替换检查。
+ * 调用方可在异步回调中检查"当前队列项仍是该 token 时"才执行条件替换。
+ */
+export interface EnqueuedOp {
+  /** 不可伪造的队列项身份（对象引用）。 */
+  readonly token: SaveOp;
+  /** 仅当 label 的当前队列项仍是本 token 时返回 true（未被替换/删除）。 */
+  isCurrent: () => boolean;
+}
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -55,9 +66,14 @@ export class SaveCoordinator {
     for (const fn of this.listeners) fn(s);
   }
 
-  /** 加入或替换一个待保存操作（同 label 去重）。 */
-  enqueue(label: string, run: () => Promise<void>): void {
-    this.queue.set(label, { label, run });
+  /** 加入或替换一个待保存操作（同 label 去重）。P0-2（第 5 轮）：返回不可伪造的入队结果。 */
+  enqueue(label: string, run: () => Promise<void>): EnqueuedOp {
+    const op: SaveOp = { label, run };
+    this.queue.set(label, op);
+    return {
+      token: op,
+      isCurrent: () => this.queue.get(label) === op,
+    };
   }
 
   /** 防抖调度；failed 状态不回退为 saving（失败持续可见，直到重试成功）。 */
@@ -99,8 +115,14 @@ export class SaveCoordinator {
         while (this.queue.size > 0) {
           const ops = [...this.queue.values()];
           for (const op of ops) {
+            // P0-1（第 6 轮）：执行前检查身份——快照里尚未轮到的 op
+            // 如果在此期间被同 label 新 op 替换（旧 op 尚未开始），必须跳过。
+            // 已被替换的 op 不执行、不产生任何副作用。
+            if (this.queue.get(op.label) !== op) {
+              continue;
+            }
             await op.run();
-            // 只删除“仍是同一个 op 对象”的队列项：
+            // 只删除"仍是同一个 op 对象"的队列项：
             // 执行期间若同 label 有新 op 入队（Map.set 替换），旧 op 完成后不得连带删除新 op。
             if (this.queue.get(op.label) === op) {
               this.queue.delete(op.label);

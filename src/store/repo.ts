@@ -63,6 +63,13 @@ export async function updateSegment(
   return active().updateSegment(segmentId, patch);
 }
 
+export async function confirmSegment(
+  segmentId: string,
+  opts: { correctedText?: string } = {},
+): Promise<{ segment: SegmentRecord; resolvedIssues: IssueRecord[] } | undefined> {
+  return active().confirmSegment(segmentId, opts);
+}
+
 export async function upsertIssue(issue: IssueRecord): Promise<void> {
   return active().upsertIssue(issue);
 }
@@ -94,4 +101,34 @@ export async function relinkAudio(
   },
 ): Promise<void> {
   return active().relinkAudio(projectId, media);
+}
+
+// ---------- V1.1.4 机器文本预筛（仅服务端后端；IndexedDB 测试后端诚实降级） ----------
+
+export async function getPrefilterConfig() {
+  return active().getPrefilterConfig();
+}
+
+export async function createPrefilterRun(projectId: string) {
+  return active().createPrefilterRun(projectId);
+}
+
+export async function getLatestPrefilterRun(projectId: string) {
+  return active().getLatestPrefilterRun(projectId);
+}
+
+export async function getPrefilterRun(projectId: string, runId: string) {
+  return active().getPrefilterRun(projectId, runId);
+}
+
+export async function prefilterNext(projectId: string, runId: string) {
+  return active().prefilterNext(projectId, runId);
+}
+
+export async function prefilterRetry(projectId: string, runId: string) {
+  return active().prefilterRetry(projectId, runId);
+}
+
+export async function prefilterCancel(projectId: string, runId: string) {
+  return active().prefilterCancel(projectId, runId);
 }

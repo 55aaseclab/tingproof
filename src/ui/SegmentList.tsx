@@ -1,6 +1,7 @@
 /**
  * 字幕段列表（PRD V1.0.4）。
- * - 点击行内非操作区域 / 聚焦校对文本框 → onLocate（选中 + 精确定位 startMs，不自动播放）；
+ * - 点击行内非操作区域 → onLocate（选中 + 精确定位 startMs，不自动播放）；
+ * - 聚焦校对文本框 → onEditorFocus（V1.1.4：当前播放段只精确暂停并记录续播点；其他段等同 onLocate）；
  * - 行内“⚑ 疑点”：只打开轻量类型选择层（8 类、无预选、单例、Esc/外部/再点关闭），
  *   选择类型后才对该段创建一条 blocking 疑点；按钮与菜单不冒泡成行定位、不改播放；
  * - 行内确认按钮双向：未确认“✓ 确认本段”，已确认“↶ 取消确认”（撤销不前进/不定位/不改播放）；
@@ -27,6 +28,8 @@ interface Props {
   /** 正在播放的段（= 选中段且处于播放状态）；用于行内按钮的动态文案。 */
   playingSegmentId: string | null;
   unresolvedBySegment: Map<string, number>;
+  /** V1.1.4：未解决机器建议计数（行内显示“机器建议 ×N”）。 */
+  machineCountBySegment?: Map<string, number>;
   loopSegmentId: string | null;
   /** 正文草稿变更（组合中 composing=true；持久化策略由 Workbench 决定）。 */
   onDraftChange: (segmentId: string, text: string, composing: boolean) => void;
@@ -36,8 +39,10 @@ interface Props {
   onConfirmRow: (segmentId: string) => void;
   /** 行内撤销确认（已确认段再次点击同一按钮）。 */
   onUnconfirmRow: (segmentId: string) => void;
-  /** 点击非操作区域 / 聚焦文本框：选中并定位 startMs，不自动播放。 */
+  /** 点击非操作区域：选中并定位 startMs，不自动播放。聚焦文本框走 onEditorFocus（V1.1.4：当前播放段精确打断）。 */
   onLocate: (segmentId: string) => void;
+  /** V1.1.4：聚焦校对文本框（与行空白区点击 onLocate 语义分离，AC-041/AC-067）。 */
+  onEditorFocus: (segmentId: string) => void;
   /** 行内播放/暂停开关（含双击时间码）。 */
   onTogglePlay: (segmentId: string) => void;
   /** 行内后退 2 秒（AC-051）：Workbench 先选中按钮所在段并设活动范围，再复用 skip 钳制 seek。 */
@@ -58,6 +63,7 @@ interface RowProps {
   looping: boolean;
   menuOpen: boolean;
   unresolvedCount: number;
+  machineCount: number;
   onDraftChange: Props["onDraftChange"];
   onCompositionStart: Props["onCompositionStart"];
   onCompositionEnd: Props["onCompositionEnd"];
@@ -66,6 +72,7 @@ interface RowProps {
   onConfirmRow: Props["onConfirmRow"];
   onUnconfirmRow: Props["onUnconfirmRow"];
   onLocate: Props["onLocate"];
+  onEditorFocus: Props["onEditorFocus"];
   onTogglePlay: Props["onTogglePlay"];
   onSkipBack: Props["onSkipBack"];
   onSkipForward: Props["onSkipForward"];
@@ -132,6 +139,7 @@ const SegmentRow = memo(function SegmentRow({
   looping,
   menuOpen,
   unresolvedCount,
+  machineCount,
   onDraftChange,
   onCompositionStart,
   onCompositionEnd,
@@ -140,6 +148,7 @@ const SegmentRow = memo(function SegmentRow({
   onConfirmRow,
   onUnconfirmRow,
   onLocate,
+  onEditorFocus,
   onTogglePlay,
   onSkipBack,
   onSkipForward,
@@ -190,6 +199,7 @@ const SegmentRow = memo(function SegmentRow({
         {unresolvedCount > 0 && (
           <span className="status-chip status-questioned">⚑ 疑点 ×{unresolvedCount}</span>
         )}
+        {machineCount > 0 && <span className="status-chip machine-chip">机器建议 ×{machineCount}</span>}
         {looping && <span className="loop-indicator">⭯ 循环中</span>}
         <span className="hint">#{seg.cueNo ?? "—"}</span>
       </div>
@@ -200,7 +210,7 @@ const SegmentRow = memo(function SegmentRow({
         initialText={seg.correctedText}
         externalText={seg.correctedText}
         ariaLabel={`校对文本 ${formatDisplay(seg.startMs)}`}
-        onFocus={() => onLocate(seg.segmentId)}
+        onFocus={() => onEditorFocus(seg.segmentId)}
         onDraftChange={(v, composing) => onDraftChange(seg.segmentId, v, composing)}
         onCompositionStart={() => onCompositionStart(seg.segmentId)}
         onCompositionEnd={() => onCompositionEnd(seg.segmentId)}
@@ -212,7 +222,7 @@ const SegmentRow = memo(function SegmentRow({
           title={
             playing
               ? "暂停：停在当前位置，不会回跳段首"
-              : "播放：选中该段并从段首开始（段尾自动暂停；循环模式除外）"
+              : "播放：选中该段并起播（同段段内恢复按自动回退；有编辑打断点则从打断点无回退续播；段尾/段外从段首；段尾自动暂停；循环模式除外）"
           }
         >
           {playing ? "⏸ 暂停" : "▶ 播放"}
@@ -286,6 +296,7 @@ export function SegmentList({
   selectedId,
   playingSegmentId,
   unresolvedBySegment,
+  machineCountBySegment,
   loopSegmentId,
   onDraftChange,
   onCompositionStart,
@@ -293,6 +304,7 @@ export function SegmentList({
   onConfirmRow,
   onUnconfirmRow,
   onLocate,
+  onEditorFocus,
   onTogglePlay,
   onSkipBack,
   onSkipForward,
@@ -316,6 +328,7 @@ export function SegmentList({
           looping={seg.segmentId === loopSegmentId}
           menuOpen={menuForId === seg.segmentId}
           unresolvedCount={unresolvedBySegment.get(seg.segmentId) ?? 0}
+          machineCount={machineCountBySegment?.get(seg.segmentId) ?? 0}
           onDraftChange={onDraftChange}
           onCompositionStart={onCompositionStart}
           onCompositionEnd={onCompositionEnd}
@@ -324,6 +337,7 @@ export function SegmentList({
           onConfirmRow={onConfirmRow}
           onUnconfirmRow={onUnconfirmRow}
           onLocate={onLocate}
+          onEditorFocus={onEditorFocus}
           onTogglePlay={onTogglePlay}
           onSkipBack={onSkipBack}
           onSkipForward={onSkipForward}

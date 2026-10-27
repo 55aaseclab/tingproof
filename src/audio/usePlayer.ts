@@ -6,7 +6,7 @@
  *   段尾分支暂停后不再继续排帧）；
  * - 循环（loop region）是唯一「段尾回段首继续」的模式，且仅当 region 与当前段一致时生效；
  *   换段时旧 loop 自动安全解除；
- * - 行内/底部/F8 共用 toggleRange：播放中点击 → 暂停在当前位置（不回段首）；
+ * - 行内按钮/F8 共用 toggleRange：播放中点击 → 暂停在当前位置（不回段首）；
  *   同段段内恢复 → 自动回退且不早于段首；换段、段尾或段外 → 从段首开始；
  * - F7/F9（skip）与播放中 seek 钳制/受限于当前段；
  * - 快捷键本身（F7/F8/F9）沿用 V1.0.0，本引擎只改变这些命令作用的范围；
@@ -48,7 +48,7 @@ export interface PlayerApi {
   /** 针对给定段开/关循环 region。 */
   loopSegment: (startMs: number, endMs: number) => void;
   /**
-   * 范围感知播放/暂停开关（行内按钮、底部按钮、F8 共用）：
+   * 范围感知播放/暂停开关（行内按钮、F8 共用）：
    * 正在播放该范围 → 暂停在当前位置（不回段首）；
    * 否则 → 设为活动范围并按段内恢复/段尾/段外规则起播。
    */
@@ -57,6 +57,15 @@ export interface PlayerApi {
   playRange: (range: PlaybackRange) => void;
   /** 暂停并记录恢复点。 */
   pause: () => void;
+  /**
+   * V1.1.4 编辑打断精确续播（AC-067）：当前段正在播放时聚焦其校对文本框调用——
+   * 在精确打断位置暂停（不 seek、不回段首），并记录一次性续播点；
+   * 下一次对同一段播放从该位置继续且本次不应用自动回退，成功起播即消费。
+   * seek / ±2s / 换段 / 段尾 / 循环开关 / 主动暂停等动作都会清除该标记。
+   */
+  pauseForEdit: () => void;
+  /** 显式清除编辑打断续播点（如段落数据被外部更新）。 */
+  clearEditResume: () => void;
   seek: (ms: number) => void;
   skip: (deltaMs: number) => void;
   getCurrentMs: () => number;
@@ -88,6 +97,8 @@ export function usePlayer(
   /** 暂停点：位置 + 所属范围（换段后旧暂停点失效）。 */
   const pausedRef = useRef<PausedPoint | null>(null);
   const seekedSincePauseRef = useRef(false);
+  /** V1.1.4 编辑打断续播点：一次性消费；范围不匹配（含时间轴变化）自动失效。 */
+  const interruptResumeRef = useRef<{ ms: number; range: PlaybackRange } | null>(null);
   const rangeRef = useRef<PlaybackRange | null>(null);
   const loopRef = useRef<LoopRegion | null>(null);
   const listenersRef = useRef(new Set<(ms: number) => void>());
@@ -120,6 +131,7 @@ export function usePlayer(
     if (action.kind === "pauseAtEnd" && r) {
       a.currentTime = r.endMs / 1000; // 稳定停在段尾
       pausedRef.current = { ms: r.endMs, range: r };
+      interruptResumeRef.current = null; // 到达段尾：编辑打断续播点失效（AC-067）
       a.pause();
       notify(r.endMs);
       stopRafRef.current();
@@ -193,6 +205,7 @@ export function usePlayer(
     const onEnded = () => {
       const r = rangeRef.current;
       pausedRef.current = { ms: r ? r.endMs : clampMs(a.currentTime * 1000), range: r };
+      interruptResumeRef.current = null; // 原生 ended：编辑打断续播点失效（AC-067）
       setPlaying(false);
       stopRaf();
       notify(clampMs(a.currentTime * 1000));
@@ -227,6 +240,8 @@ export function usePlayer(
       const previousRange = rangeRef.current; // 先留旧值，暂停点必须归属旧范围
       rangeRef.current = norm;
       setRangeState(norm);
+      // 换段（含同段时间轴变化导致的范围不同）：编辑打断续播点失效（AC-067）。
+      if (!sameRange(previousRange, norm)) interruptResumeRef.current = null;
       // 旧 loop 安全解除：不对应新范围即清除，避免换段后跳回旧段。
       const lp = loopRef.current;
       if (lp && !sameRange(lp, norm)) {
@@ -249,6 +264,7 @@ export function usePlayer(
   const loopSegment = useCallback((startMs: number, endMs: number) => {
     const norm = normalizeRange(startMs, endMs);
     if (!norm) return; // 明确拒绝无效范围
+    interruptResumeRef.current = null; // 开关循环：编辑打断续播点失效（AC-067）
     const lp = loopRef.current;
     if (lp && lp.startMs === norm.startMs && lp.endMs === norm.endMs) {
       loopRef.current = null;
@@ -269,6 +285,11 @@ export function usePlayer(
       const cur = clampMs(a.currentTime * 1000);
       // 正在播放该范围 → 暂停在当前位置（不定位、不回段首）。
       if (!a.paused && sameRange(previousRange, norm)) {
+        // P1-1（第 2 轮）：用户显式暂停 → 清除编辑打断续播点。
+        // 场景：用旧编辑点发起 play（promise 未决）→ 立即再点按钮暂停 →
+        // 旧标记若不清除，下一次播放会错误地再次无回退使用旧点，而应走常规 auto-rewind。
+        // 注意：旧 play promise 的 .then 不会清除（P1-4 已守卫：只消费本次使用的对象）。
+        interruptResumeRef.current = null;
         pausedRef.current = { ms: cur, range: previousRange };
         a.pause();
         return;
@@ -276,18 +297,27 @@ export function usePlayer(
       setRange(norm);
       // 换段（即使时间范围重叠）必须从新段 start_ms 开始（PRD V1.0.2 §3.2.5）。
       let seekTarget: number | null;
+      let usedInterrupt: { ms: number; range: PlaybackRange } | null = null;
       if (!sameRange(previousRange, norm)) {
         seekTarget = norm.startMs;
       } else {
         const paused = pausedRef.current;
-        seekTarget = resolvePlayTarget({
-          currentTimeMs: cur,
-          pausedAtMs: paused ? paused.ms : null,
-          pausedAtInRange: sameRange(paused ? paused.range : null, norm),
-          seekedSincePause: seekedSincePauseRef.current,
-          autoRewindMs: autoRewindRef.current,
-          range: norm,
-        });
+        const interrupt = interruptResumeRef.current;
+        if (interrupt && sameRange(interrupt.range, norm)) {
+          // V1.1.4 编辑打断精确续播（AC-067）：从精确打断点继续，本次不应用自动回退；
+          // 标记在成功起播后消费（play reject 时保留，重试仍从精确打断点）。
+          usedInterrupt = interrupt;
+          seekTarget = clampMs(interrupt.ms, norm.startMs, Math.max(norm.startMs, norm.endMs - 1));
+        } else {
+          seekTarget = resolvePlayTarget({
+            currentTimeMs: cur,
+            pausedAtMs: paused ? paused.ms : null,
+            pausedAtInRange: sameRange(paused ? paused.range : null, norm),
+            seekedSincePause: seekedSincePauseRef.current,
+            autoRewindMs: autoRewindRef.current,
+            range: norm,
+          });
+        }
       }
       if (seekTarget !== null) {
         a.currentTime = seekTarget / 1000;
@@ -295,9 +325,19 @@ export function usePlayer(
       }
       pausedRef.current = null;
       seekedSincePauseRef.current = false;
-      void a.play().catch(() => {
-        // 自动播放策略或解码失败：保持暂停状态，不崩溃。
-      });
+      void a
+        .play()
+        .then(() => {
+          // 成功起播后消费（AC-067）——只消费本次实际使用的标记对象：
+          // 若 play 未决期间用户再次编辑暂停生成了新打断点（不同对象），旧 promise 不得清除它。
+          if (usedInterrupt && interruptResumeRef.current === usedInterrupt) {
+            interruptResumeRef.current = null;
+          }
+        })
+        .catch(() => {
+          // 自动播放策略或解码失败：保持暂停状态，不崩溃；
+          // 编辑打断续播点保留——下一次重试仍从精确打断点无回退续播。
+        });
     },
     [audioRef, notify, setRange],
   );
@@ -309,6 +349,7 @@ export function usePlayer(
       if (!a) return;
       const norm = normalizeRange(target.startMs, target.endMs);
       if (!norm) return;
+      interruptResumeRef.current = null; // 显式从段首播放：编辑打断续播点失效
       setRange(norm);
       a.currentTime = norm.startMs / 1000;
       notify(norm.startMs);
@@ -324,14 +365,35 @@ export function usePlayer(
   const pause = useCallback(() => {
     const a = audioRef.current;
     if (!a || a.paused) return;
+    interruptResumeRef.current = null; // 用户主动暂停：编辑打断续播点失效，恢复常规自动回退
     pausedRef.current = { ms: clampMs(a.currentTime * 1000), range: rangeRef.current };
     a.pause();
   }, [audioRef]);
+
+  /**
+   * V1.1.4 编辑打断精确续播（AC-067）：当前段播放中聚焦其校对文本框——
+   * 在精确位置暂停（不 seek、不定位段首），记录一次性续播点。
+   */
+  const pauseForEdit = useCallback(() => {
+    const a = audioRef.current;
+    if (!a || a.paused) return;
+    const cur = clampMs(a.currentTime * 1000);
+    const r = rangeRef.current;
+    interruptResumeRef.current = r ? { ms: cur, range: r } : null;
+    pausedRef.current = { ms: cur, range: r };
+    a.pause();
+  }, [audioRef]);
+
+  /** 显式清除编辑打断续播点（段落数据外部更新等）。 */
+  const clearEditResume = useCallback(() => {
+    interruptResumeRef.current = null;
+  }, []);
 
   const seek = useCallback(
     (ms: number) => {
       const a = audioRef.current;
       if (!a) return;
+      interruptResumeRef.current = null; // 用户主动 seek（含 ±2s）：续播点失效
       const max = Number.isFinite(a.duration) ? clampMs(a.duration * 1000) : Number.MAX_SAFE_INTEGER;
       const target = clampMs(ms, 0, max);
       a.currentTime = target / 1000;
@@ -408,6 +470,8 @@ export function usePlayer(
     toggleRange,
     playRange,
     pause,
+    pauseForEdit,
+    clearEditResume,
     seek,
     skip,
     getCurrentMs,

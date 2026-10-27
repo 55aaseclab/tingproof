@@ -1,5 +1,6 @@
 /**
- * 服务端测试基础设施：真实的 HTTP + SQLite（临时目录文件库），可重启模拟服务进程重启。
+ * 服务端测试基础设施：真实的 HTTP + SQLite（临时目录文件库），可重启模拟服务进程重启；
+ * V1.1.4：可注入假预筛模型（prefilterModel）。
  */
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -7,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApiMiddleware } from "../server/apiHandler.js";
 import { SqliteProjectStore } from "../server/sqliteStore.js";
+import type { PrefilterModel } from "../server/prefilterModel.ts";
 import type { SegmentStatus } from "../src/store/types.js";
 
 export interface ApiResult {
@@ -19,16 +21,21 @@ export interface TestServer {
   dbPath: string;
   store: SqliteProjectStore;
   req: (method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<ApiResult>;
-  /** 模拟服务进程重启：关闭 HTTP + 数据库连接，再以同一数据库文件重新打开。 */
-  restart: () => Promise<void>;
+  /** 模拟服务进程重启：关闭 HTTP + 数据库连接，再以同一数据库文件重新打开。
+   *  可选覆盖 prefilterModel（模拟服务重启后模型配置变更，仍复用同一 temp dbPath）。 */
+  restart: (opts?: { prefilterModel?: PrefilterModel }) => Promise<void>;
   dispose: () => Promise<void>;
 }
 
-export async function startTestServer(): Promise<TestServer> {
+export async function startTestServer(
+  opts: { prefilterModel?: PrefilterModel } = {},
+): Promise<TestServer> {
   const dir = mkdtempSync(join(tmpdir(), "tingproof-test-"));
   const dbPath = join(dir, "tingproof.db");
   let store = new SqliteProjectStore(dbPath);
-  let middleware = createApiMiddleware({ store });
+  // 可变当前模型：restart({ prefilterModel }) 可覆盖（模拟服务重启后配置变更）。
+  let currentModel = opts.prefilterModel;
+  let middleware = createApiMiddleware({ store, prefilterModel: currentModel });
   let server: Server | null = null;
   let baseUrl = "";
 
@@ -58,6 +65,10 @@ export async function startTestServer(): Promise<TestServer> {
         store.close();
         resolve();
       });
+      // undici keep-alive：close(callback) 只停止监听并等连接自然退出（每例 5-10s）。
+      // 先关空闲连接，兜底强制断开全部连接，让 teardown 立即完成。
+      server.closeIdleConnections();
+      server.closeAllConnections();
     });
 
   await listen();
@@ -80,10 +91,11 @@ export async function startTestServer(): Promise<TestServer> {
       const text = await res.text();
       return { status: res.status, body: text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : null };
     },
-    async restart() {
+    async restart(restartOpts?: { prefilterModel?: PrefilterModel }) {
       await closeAll();
+      if (restartOpts?.prefilterModel !== undefined) currentModel = restartOpts.prefilterModel;
       store = new SqliteProjectStore(dbPath);
-      middleware = createApiMiddleware({ store });
+      middleware = createApiMiddleware({ store, prefilterModel: currentModel });
       await listen();
     },
     async dispose() {

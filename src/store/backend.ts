@@ -17,12 +17,20 @@ export interface TingProofRepository {
   getProjectIssues: (typeof import("./idbRepo.js"))["getProjectIssues"];
   getSrtSource: (typeof import("./idbRepo.js"))["getSrtSource"];
   updateSegment: (typeof import("./idbRepo.js"))["updateSegment"];
+  confirmSegment: (typeof import("./idbRepo.js"))["confirmSegment"];
   upsertIssue: (typeof import("./idbRepo.js"))["upsertIssue"];
   deleteIssue: (typeof import("./idbRepo.js"))["deleteIssue"];
   touchProject: (typeof import("./idbRepo.js"))["touchProject"];
   savePlayback: (typeof import("./idbRepo.js"))["savePlayback"];
   updateMediaDuration: (typeof import("./idbRepo.js"))["updateMediaDuration"];
   relinkAudio: (typeof import("./idbRepo.js"))["relinkAudio"];
+  getPrefilterConfig: (typeof import("./idbRepo.js"))["getPrefilterConfig"];
+  createPrefilterRun: (typeof import("./idbRepo.js"))["createPrefilterRun"];
+  getPrefilterRun: (typeof import("./idbRepo.js"))["getPrefilterRun"];
+  getLatestPrefilterRun: (typeof import("./idbRepo.js"))["getLatestPrefilterRun"];
+  prefilterNext: (typeof import("./idbRepo.js"))["prefilterNext"];
+  prefilterRetry: (typeof import("./idbRepo.js"))["prefilterRetry"];
+  prefilterCancel: (typeof import("./idbRepo.js"))["prefilterCancel"];
 }
 
 let override: BackendKind | null = null;

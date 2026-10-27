@@ -222,8 +222,10 @@ describe("草稿管道与安全语义（第 12 轮）", () => {
     alertSpy.mockRestore();
   });
 
-  it("确认读取最新草稿：原空段输入非空草稿 → 行内确认与 Ctrl+Enter 均放行", () => {
+  it("确认读取最新草稿：原空段输入非空草稿 → 行内确认与 Ctrl+Enter 均放行", async () => {
     // 场景 2：原空段（correctedText=""）输入非空草稿。
+    // V1.1.4 原子确认经真实持久层：先播种同 segmentId（DB 原文/校对稿与 props 一致）。
+    await seedProject([makeSeg("seg-a", 1000, 2000, "")]);
     const { container } = render(
       <Workbench
         meta={META}
@@ -240,10 +242,13 @@ describe("草稿管道与安全语义（第 12 轮）", () => {
     typeInto(editor, "新内容");
     // 行内确认放行。
     fireEvent.click(within(row("seg-a")).getByRole("button", { name: "确认本段" }));
-    expect(within(row("seg-a")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    await waitFor(() => {
+      expect(within(row("seg-a")).getByRole("button", { name: "取消确认" })).toBeTruthy();
+    });
   });
 
-  it("Ctrl+Enter 同样遵守最新草稿：原空段输入后直接确认并前进", () => {
+  it("Ctrl+Enter 同样遵守最新草稿：原空段输入后直接确认并前进", async () => {
+    await seedProject([makeSeg("seg-a", 1000, 2000, ""), makeSeg("seg-b", 2000, 3000, "已校对")]);
     const { container } = render(
       <Workbench
         meta={META}
@@ -262,7 +267,9 @@ describe("草稿管道与安全语义（第 12 轮）", () => {
     const editor = within(row("seg-a")).getByRole("textbox") as HTMLTextAreaElement;
     typeInto(editor, "Ctrl 草稿");
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true }); // 无草稿时会被空文本阻止
-    expect(within(row("seg-a")).getByRole("button", { name: "取消确认" })).toBeTruthy(); // 放行并确认
+    await waitFor(() => {
+      expect(within(row("seg-a")).getByRole("button", { name: "取消确认" })).toBeTruthy(); // 放行并确认
+    });
     expect(within(row("seg-b")).getByRole("button", { name: "确认本段" })).toBeTruthy(); // 前进到 B
   });
 

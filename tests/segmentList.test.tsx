@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * SegmentList 组件测试（PRD V1.0.2 §3.3.5 / AC-041 / AC-042）：
- * - 点击行非操作区域 / 聚焦 textarea → 只触发 onLocate（不触发播放）；
+ * - 点击行非操作区域 → 只触发 onLocate（不触发播放）；聚焦 textarea → onEditorFocus（V1.1.4 分离语义）；
  * - 行内按钮文案与可访问名称动态切换（▶ 播放 / ⏸ 暂停）；
  * - 点击按钮只触发 onTogglePlay（不冒泡成行定位）；
  * - 双击时间码等价于播放/暂停开关。
@@ -46,6 +46,7 @@ function renderList(over: {
   segments?: SegmentRecord[];
   selectedId?: string | null;
   onLocate?: ReturnType<typeof vi.fn>;
+  onEditorFocus?: ReturnType<typeof vi.fn>;
   onTogglePlay?: ReturnType<typeof vi.fn>;
   onSkipBack?: ReturnType<typeof vi.fn>;
   onSkipForward?: ReturnType<typeof vi.fn>;
@@ -54,6 +55,7 @@ function renderList(over: {
   onCreateIssueWithType?: ReturnType<typeof vi.fn>;
 } = {}) {
   const onLocate = over.onLocate ?? vi.fn();
+  const onEditorFocus = over.onEditorFocus ?? vi.fn();
   const onTogglePlay = over.onTogglePlay ?? vi.fn();
   const onSkipBack = over.onSkipBack ?? vi.fn();
   const onSkipForward = over.onSkipForward ?? vi.fn();
@@ -74,6 +76,7 @@ function renderList(over: {
       onConfirmRow={onConfirmRow}
       onUnconfirmRow={onUnconfirmRow}
       onLocate={onLocate}
+      onEditorFocus={onEditorFocus}
       onTogglePlay={onTogglePlay}
       onSkipBack={onSkipBack}
       onSkipForward={onSkipForward}
@@ -87,6 +90,7 @@ function renderList(over: {
     ...utils,
     row,
     onLocate,
+  onEditorFocus,
     onTogglePlay,
     onSkipBack,
     onSkipForward,
@@ -104,10 +108,10 @@ describe("SegmentList 行内交互（AC-041 / AC-042）", () => {
     expect(onTogglePlay).not.toHaveBeenCalled();
   });
 
-  it("聚焦校对文本框：只触发 onLocate，不触发播放", () => {
-    const { onLocate, onTogglePlay } = renderList();
+  it("聚焦校对文本框：只触发 onEditorFocus（V1.1.4 分离语义），不触发播放", () => {
+    const { onEditorFocus, onTogglePlay } = renderList();
     fireEvent.focusIn(screen.getByRole("textbox"));
-    expect(onLocate).toHaveBeenCalledWith("seg-1");
+    expect(onEditorFocus).toHaveBeenCalledWith("seg-1");
     expect(onTogglePlay).not.toHaveBeenCalled();
   });
 
@@ -198,6 +202,7 @@ describe("SegmentList 行内交互（AC-041 / AC-042）", () => {
         onConfirmRow={vi.fn()}
         onUnconfirmRow={vi.fn()}
         onLocate={vi.fn()}
+        onEditorFocus={vi.fn()}
         onTogglePlay={vi.fn()}
         onSkipBack={vi.fn()}
         onSkipForward={vi.fn()}
@@ -324,6 +329,7 @@ describe("行内疑点类型选择层（PRD V1.0.4 AC-044）", () => {
         onConfirmRow={vi.fn()}
         onUnconfirmRow={vi.fn()}
         onLocate={vi.fn()}
+        onEditorFocus={vi.fn()}
         onTogglePlay={vi.fn()}
         onSkipBack={vi.fn()}
         onSkipForward={vi.fn()}
@@ -439,6 +445,7 @@ describe("行内按钮尺寸一致（PRD V1.0.5 AC-047）", () => {
           onConfirmRow={vi.fn()}
           onUnconfirmRow={vi.fn()}
           onLocate={vi.fn()}
+          onEditorFocus={vi.fn()}
           onTogglePlay={vi.fn()}
           onSkipBack={vi.fn()}
           onSkipForward={vi.fn()}
@@ -476,6 +483,7 @@ describe("输入渲染范围（PRD V1.0.5 AC-048）", () => {
     const onConfirmRow = useCallback(() => undefined, []);
     const onUnconfirmRow = useCallback(() => undefined, []);
     const onLocate = useCallback(() => undefined, []);
+    const onEditorFocus = useCallback(() => undefined, []);
     const onTogglePlay = useCallback(() => undefined, []);
     const onSkipBack = useCallback(() => undefined, []);
     const onSkipForward = useCallback(() => undefined, []);
@@ -495,6 +503,7 @@ describe("输入渲染范围（PRD V1.0.5 AC-048）", () => {
           onConfirmRow={onConfirmRow}
           onUnconfirmRow={onUnconfirmRow}
           onLocate={onLocate}
+          onEditorFocus={onEditorFocus}
           onTogglePlay={onTogglePlay}
           onSkipBack={onSkipBack}
           onSkipForward={onSkipForward}

@@ -3,7 +3,9 @@
  * - 全部读写走同一服务的 /api；项目归属服务端工作空间，与浏览器/设备/origin 无关；
  * - 每个请求携带持久但非实名的 client instance ID（X-TingProof-Client-Id）与明确 source
  *   （X-TingProof-Source: web），供服务端审计记录；clientId 不代表经过认证的人；
- * - 每次写入携带 expectedRevision（来自最近一次成功读写的 revision 缓存）；
+ * - ground-truth 写入携带 expectedRevision（来自最近一次成功读写的 revision 缓存）；
+ *   例外：首次创建（createProject/migrateProject）与预筛 run/batch 操作性元数据
+ *   （§3.4.9：创建 run 不携带 expectedRevision）；
  *   409 时抛 RevisionConflictError，绝不采用服务端返回的新版本静默重试（由用户刷新/比较后重试）；
  * - 服务不可达时抛 ServerUnavailableError：调用方（SaveCoordinator）保留内存草稿与失败队列；
  * - 音频正文与文件句柄绝不上传（relink 只发可序列化元数据）。
@@ -18,6 +20,8 @@ import type {
   IssueRecord,
   MediaInfo,
   PlaybackState,
+  PrefilterConfigDto,
+  PrefilterRunDto,
   ProjectMeta,
   SegmentRecord,
   SrtSourceRecord,
@@ -289,7 +293,110 @@ export class RemoteProjectRepository implements TingProofRepository {
     return await this.mustOk(result, "读取审计事件失败");
   }
 
-  // ---------- 写入（全部带 expectedRevision） ----------
+  // ---------- V1.1.4 机器文本预筛（PRD §3.4.9 / AC-069~071） ----------
+
+  /** 配置只含 available/provider/model/promptVersion；绝不包含 API key 或敏感 URL。 */
+  async getPrefilterConfig(): Promise<PrefilterConfigDto> {
+    const result = await this.request("/text-prefilter/config");
+    return await this.mustOk<PrefilterConfigDto>(result, "读取预筛配置失败");
+  }
+
+  /**
+   * 创建（或按 scope 复用）run：冻结未确认段 originalText 清单，不发送音频/correctedText。
+   * P0-3（第 5 轮）：run/batch 是操作性恢复元数据，创建 run 不改 project revision，
+   * 因此 POST body 为空对象（不携带 expectedRevision）——服务端拒绝未知字段。
+   */
+  async createPrefilterRun(projectId: string): Promise<PrefilterRunDto> {
+    const result = await this.request(`/projects/${encodeURIComponent(projectId)}/text-prefilter-runs`, {
+      method: "POST",
+      body: {},
+    });
+    const body = await this.mustOk<{ run: PrefilterRunDto }>(result, "创建预筛 run 失败");
+    return body.run;
+  }
+
+  /** P0-3：最近 run 只读发现（无 run 返回 null，不创建、不触发模型）。 */
+  async getLatestPrefilterRun(projectId: string): Promise<PrefilterRunDto | null> {
+    const result = await this.request(`/projects/${encodeURIComponent(projectId)}/text-prefilter-runs`);
+    const body = await this.mustOk<{ run: PrefilterRunDto | null }>(result, "读取最近预筛 run 失败");
+    return body.run;
+  }
+
+  async getPrefilterRun(projectId: string, runId: string): Promise<PrefilterRunDto> {
+    const result = await this.request(
+      `/projects/${encodeURIComponent(projectId)}/text-prefilter-runs/${encodeURIComponent(runId)}`,
+    );
+    return (await this.mustOk<{ run: PrefilterRunDto }>(result, "读取预筛进度失败")).run;
+  }
+
+  /** 处理/复用下一批；processed=false 表示批次被其他调用持有（不得忙轮询）。 */
+  async prefilterNext(
+    projectId: string,
+    runId: string,
+  ): Promise<{ run: PrefilterRunDto; revision: number; error: { code: string; message: string } | null; processed: boolean }> {
+    const result = await this.request(
+      `/projects/${encodeURIComponent(projectId)}/text-prefilter-runs/${encodeURIComponent(runId)}/next`,
+      { method: "POST", body: {} },
+    );
+    const body = await this.mustOk<{
+      run: PrefilterRunDto;
+      revision?: number;
+      error: { code: string; message: string } | null;
+      processed: boolean;
+    }>(result, "处理预筛批次失败");
+    if (typeof body.revision === "number") {
+      const previous = this.revisionCache.get(projectId);
+      if (previous === undefined || body.revision > previous) {
+        this.revisionCache.set(projectId, body.revision);
+      }
+    }
+    return {
+      run: body.run,
+      revision: body.revision ?? this.revisionCache.get(projectId) ?? 0,
+      error: body.error ?? null,
+      processed: body.processed ?? true,
+    };
+  }
+
+  /** 只重试失败批次；成功批次不再次调用模型。 */
+  async prefilterRetry(
+    projectId: string,
+    runId: string,
+  ): Promise<{ run: PrefilterRunDto; revision: number; error: { code: string; message: string } | null; processed: boolean }> {
+    const result = await this.request(
+      `/projects/${encodeURIComponent(projectId)}/text-prefilter-runs/${encodeURIComponent(runId)}/retry`,
+      { method: "POST", body: {} },
+    );
+    const body = await this.mustOk<{
+      run: PrefilterRunDto;
+      revision?: number;
+      error: { code: string; message: string } | null;
+      processed: boolean;
+    }>(result, "重试预筛批次失败");
+    if (typeof body.revision === "number") {
+      const previous = this.revisionCache.get(projectId);
+      if (previous === undefined || body.revision > previous) {
+        this.revisionCache.set(projectId, body.revision);
+      }
+    }
+    return {
+      run: body.run,
+      revision: body.revision ?? this.revisionCache.get(projectId) ?? 0,
+      error: body.error ?? null,
+      processed: body.processed ?? true,
+    };
+  }
+
+  /** 在批次边界取消：保留已成功候选，不伪装完成。 */
+  async prefilterCancel(projectId: string, runId: string): Promise<PrefilterRunDto> {
+    const result = await this.request(
+      `/projects/${encodeURIComponent(projectId)}/text-prefilter-runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST", body: {} },
+    );
+    return (await this.mustOk<{ run: PrefilterRunDto }>(result, "取消预筛失败")).run;
+  }
+
+  // ---------- 写入（ground-truth 带 expectedRevision；首次创建和预筛操作性元数据例外） ----------
 
   async createProject(input: CreateProjectInput): Promise<ProjectMeta> {
     const result = await this.request("/projects", {
@@ -341,6 +448,37 @@ export class RemoteProjectRepository implements TingProofRepository {
     }>(result, "保存字幕段失败");
     this.noteWriteRevision(projectId, body);
     return body.segment;
+  }
+
+  /**
+   * V1.1.4 原子确认（AC-068）：一次请求确认目标段（可选同事务应用 correctedText 草稿）
+   * 并解决该段全部 open 疑点；返回 canonical segment 与 resolvedIssues。
+   */
+  async confirmSegment(
+    segmentId: string,
+    opts: { correctedText?: string } = {},
+  ): Promise<{ segment: SegmentRecord; resolvedIssues: IssueRecord[] } | undefined> {
+    const projectId = this.segmentProject.get(segmentId);
+    if (!projectId) {
+      throw new RevisionConflictError("缺少字幕段归属信息，请重新打开项目后重试。", undefined);
+    }
+    const expectedRevision = this.expectedRevisionOrThrow(projectId);
+    const path = `/projects/${encodeURIComponent(projectId)}/segments/${encodeURIComponent(segmentId)}/confirm`;
+    const result = await this.request(path, {
+      method: "POST",
+      body: {
+        expectedRevision,
+        ...(opts.correctedText !== undefined ? { correctedText: opts.correctedText } : {}),
+      },
+    });
+    const body = await this.mustOk<{
+      segment: SegmentRecord;
+      resolvedIssues: IssueRecord[];
+      revision: number;
+      project: ProjectSummaryDto;
+    }>(result, "确认失败");
+    this.noteWriteRevision(projectId, body);
+    return { segment: body.segment, resolvedIssues: body.resolvedIssues ?? [] };
   }
 
   async upsertIssue(issue: IssueRecord): Promise<void> {

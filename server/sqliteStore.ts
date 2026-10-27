@@ -10,6 +10,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { badRequest, conflict, notFound, sourceConflict } from "./errors.ts";
+import { candidateKeyOf, sha256Hex } from "./prefilterModel.ts";
+import { randomUuid } from "../src/core/identity.js";
 import type {
   AuditEventRecord,
   IssueRecord,
@@ -24,8 +26,8 @@ import type {
 
 export const SERVICE_WORKSPACE_ID = "workspace-local";
 
-/** 当前服务端 schema 版本（PRAGMA user_version）。V1.1.1：audit_events 富审计列。 */
-export const SCHEMA_VERSION = 2;
+/** 当前服务端 schema 版本（PRAGMA user_version）。V1.1.1：audit_events 富审计列；V1.1.4：issues 机器来源列 + 预筛三表。 */
+export const SCHEMA_VERSION = 3;
 
 /**
  * 写入请求的客户端来源（PRD V1.1.1 §4.4.6 二）：
@@ -91,6 +93,10 @@ const ISSUE_KEYS = [
   "status",
   "createdAt",
   "resolvedAt",
+  // V1.1.4：允许客户端往返携带（listIssues 返回），但写入路径服务端控制——
+  // 人工 PUT 一律 human/null，机器来源只能由预筛管线写入。
+  "origin",
+  "machineMetadata",
 ] as const;
 
 function rejectUnknownKeys(
@@ -148,7 +154,9 @@ CREATE TABLE IF NOT EXISTS issues (
   note TEXT NOT NULL,
   status TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  resolved_at INTEGER
+  resolved_at INTEGER,
+  origin TEXT NOT NULL DEFAULT 'human',
+  machine_metadata TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id);
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -167,6 +175,65 @@ CREATE TABLE IF NOT EXISTS audit_events (
   metadata_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_events_project ON audit_events(project_id, id);
+CREATE TABLE IF NOT EXISTS prefilter_runs (
+  run_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  scope_hash TEXT NOT NULL,
+  total INTEGER NOT NULL,
+  processed INTEGER NOT NULL DEFAULT 0,
+  created_count INTEGER NOT NULL DEFAULT 0,
+  reused_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  failed_batches INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER,
+  completed_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_prefilter_runs_project ON prefilter_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_prefilter_runs_scope ON prefilter_runs(project_id, scope_hash);
+CREATE TABLE IF NOT EXISTS prefilter_batches (
+  batch_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  batch_no INTEGER NOT NULL,
+  input_hash TEXT NOT NULL,
+  inputs_json TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  claimed_by TEXT,
+  claimed_at INTEGER,
+  error_code TEXT,
+  error_message TEXT,
+  created_count INTEGER NOT NULL DEFAULT 0,
+  reused_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (run_id, batch_no)
+);
+CREATE INDEX IF NOT EXISTS idx_prefilter_batches_input ON prefilter_batches(input_hash, status);
+CREATE TABLE IF NOT EXISTS prefilter_candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  candidate_key TEXT NOT NULL,
+  segment_id TEXT NOT NULL,
+  issue_id TEXT,
+  suspicious_text TEXT NOT NULL,
+  type TEXT NOT NULL,
+  suggestion TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  source_text_hash TEXT NOT NULL,
+  disposition TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (batch_id, candidate_key)
+);
+CREATE INDEX IF NOT EXISTS idx_prefilter_candidates_key ON prefilter_candidates(project_id, candidate_key);
 `;
 
 /**
@@ -183,24 +250,50 @@ const AUDIT_EVENT_V1_1_1_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> =
   { name: "metadata_json", ddl: "TEXT" },
 ];
 
+/** V1.1.4 预筛批次 claim 列（批处理原子认领；早期 v3 库可能缺失，原地补齐）。 */
+const PREFILTER_BATCH_CLAIM_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> = [
+  { name: "claimed_by", ddl: "TEXT" },
+  { name: "claimed_at", ddl: "INTEGER" },
+];
+
+/**
+ * V1.1.4 issues 机器来源列（相对 V1.1.2 的增量）。
+ * 旧行迁移为 origin='human'（DEFAULT 回填）、machine_metadata=NULL——canonical 口径：
+ * 旧疑点一律 human/null，绝不虚构机器来源。
+ */
+const ISSUES_V1_1_4_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> = [
+  { name: "origin", ddl: "TEXT NOT NULL DEFAULT 'human'" },
+  { name: "machine_metadata", ddl: "TEXT" },
+];
+
 /** 读取数据库 schema version（PRAGMA user_version）；只读，不修改任何状态。 */
 function readUserVersion(db: DatabaseSync): number {
   const row = db.prepare("PRAGMA user_version").get() as Record<string, unknown>;
   return Number(row.user_version ?? 0);
 }
 
-/** 原地、幂等、无损迁移：补齐 audit_events 富审计列并写入 schema version。
- *  只允许在当前版本 ≤ SCHEMA_VERSION 时调用（构造器已先行检查），因此升级永不倒退。 */
-function migrateAuditEvents(db: DatabaseSync): void {
-  const info = db.prepare("PRAGMA table_info(audit_events)").all() as unknown as Array<
+/** 原地补齐指定表缺失的列（幂等：逐列检查，已存在则跳过）。 */
+function addMissingColumns(db: DatabaseSync, table: string, columns: ReadonlyArray<{ name: string; ddl: string }>): void {
+  const info = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<
     Record<string, unknown>
   >;
   const existing = new Set(info.map((col) => String(col.name)));
-  for (const col of AUDIT_EVENT_V1_1_1_COLUMNS) {
+  for (const col of columns) {
     if (!existing.has(col.name)) {
-      db.exec(`ALTER TABLE audit_events ADD COLUMN ${col.name} ${col.ddl}`);
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${col.name} ${col.ddl}`);
     }
   }
+}
+
+/**
+ * 原地、幂等、无损迁移（SCHEMA 的 CREATE TABLE IF NOT EXISTS 已建新表/新库结构；
+ * 这里只负责旧表补列 + 写入 schema version）。
+ * 只允许在当前版本 ≤ SCHEMA_VERSION 时调用（构造器已先行检查），因此升级永不倒退。
+ */
+function migrateSchema(db: DatabaseSync): void {
+  addMissingColumns(db, "audit_events", AUDIT_EVENT_V1_1_1_COLUMNS);
+  addMissingColumns(db, "issues", ISSUES_V1_1_4_COLUMNS);
+  addMissingColumns(db, "prefilter_batches", PREFILTER_BATCH_CLAIM_COLUMNS);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -391,6 +484,58 @@ function sanitizePlayback(input: unknown): PlaybackState {
 export const AUDIT_EVENTS_MAX_LIMIT = 500;
 export const AUDIT_EVENTS_DEFAULT_LIMIT = 100;
 
+// ---------- V1.1.4 机器文本预筛 DTO（PRD §3.4.9 运行数据字典） ----------
+
+/** 冻结的批输入段（只含稳定 ID 与不可变原文，绝不含 correctedText 或音频信息）。 */
+export interface PrefilterSegmentInput {
+  segmentId: string;
+  cueNo: number | null;
+  originalText: string;
+  sourceTextHash: string;
+}
+
+/** 通过严格校验、待 materialize 的结构化候选。 */
+export interface PrefilterMaterializeCandidate {
+  segmentId: string;
+  suspiciousText: string;
+  type: string;
+  suggestion: string;
+  confidence: string;
+  reason: string;
+  sourceTextHash: string;
+}
+
+export interface PrefilterBatchSummary {
+  batchId: string;
+  batchNo: number;
+  status: string;
+  attemptCount: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdCount: number;
+  reusedCount: number;
+  rejectedCount: number;
+  segmentCount: number;
+}
+
+export interface PrefilterRunSummary {
+  runId: string;
+  projectId: string;
+  status: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  total: number;
+  processed: number;
+  created: number;
+  reused: number;
+  rejected: number;
+  failedBatches: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  batches: PrefilterBatchSummary[];
+}
+
 export class SqliteProjectStore {
   private readonly db: DatabaseSync;
   private readonly stmts: {
@@ -414,6 +559,10 @@ export class SqliteProjectStore {
   };
 
   readonly dbPath: string;
+  /** 本 store 实例的稳定标识：预筛批次 claim 所有权；close() 时释放本实例的 running 认领。 */
+  private readonly instanceId = `psi-${randomUuid()}`;
+  /** running 认领的安全租约（超过视为持有者已死亡，可被回收；远大于单次模型调用最长时长）。 */
+  static readonly PREFILTER_CLAIM_LEASE_MS = 10 * 60_000;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -437,7 +586,7 @@ export class SqliteProjectStore {
       this.db.exec(SCHEMA);
       // 旧库原地、幂等、无损迁移（V1.1.1 富审计列）；新库为 no-op。
       // 此处只在 versionOnOpen ≤ SCHEMA_VERSION 时到达，升级不会倒退版本。
-      migrateAuditEvents(this.db);
+      migrateSchema(this.db);
       this.stmts = {
         getProject: this.db.prepare(
           "SELECT * FROM projects WHERE project_id = ?",
@@ -507,6 +656,18 @@ export class SqliteProjectStore {
   }
 
   close(): void {
+    // 优雅关闭：释放本实例持有的预筛批次认领（回到 queued，重开后可恢复；
+    // 进程崩溃等非优雅退出由 PREFILTER_CLAIM_LEASE_MS 租约兜底回收）。
+    try {
+      // P0-4：只释放非取消 run 的认领——已取消 run 的 running 批改回 queued 会复活取消。
+      this.db
+        .prepare(
+          "UPDATE prefilter_batches SET status = 'queued' WHERE status = 'running' AND claimed_by = ? AND run_id NOT IN (SELECT run_id FROM prefilter_runs WHERE status = 'cancelled')",
+        )
+        .run(this.instanceId);
+    } catch {
+      // 表可能尚不存在（旧库首次打开前）：忽略，正常关闭。
+    }
     this.db.close();
   }
 
@@ -576,6 +737,14 @@ export class SqliteProjectStore {
   }
 
   private rowToIssue(row: Record<string, unknown>): IssueRecord {
+    let machineMetadata: Record<string, unknown> | null = null;
+    if (typeof row.machine_metadata === "string" && row.machine_metadata.length > 0) {
+      try {
+        machineMetadata = JSON.parse(row.machine_metadata) as Record<string, unknown>;
+      } catch {
+        machineMetadata = null; // 损坏的机器元数据不阻塞人工链路（疑点本体仍可用）
+      }
+    }
     return {
       issueId: row.issue_id as string,
       projectId: row.project_id as string,
@@ -588,6 +757,8 @@ export class SqliteProjectStore {
       status: row.status as IssueStatus,
       createdAt: row.created_at as number,
       resolvedAt: (row.resolved_at as number | null) ?? null,
+      origin: (row.origin as "human" | "machine_prefilter") ?? "human",
+      machineMetadata,
     };
   }
 
@@ -1120,6 +1291,131 @@ export class SqliteProjectStore {
     });
   }
 
+  /**
+   * V1.1.4 原子确认（PRD §4.4.4 写入约定 7 / AC-068）：
+   * 一次事务内把目标段改为 confirmed（可选同事务应用 pending 的 correctedText 草稿），
+   * 并把该段全部 open 疑点按稳定 issueId 顺序改为 resolved（同一确认时间）。
+   * - 项目 revision 只增长一次；confirm_segment 与全部 resolve_issue 共享 revision 与时间戳；
+   * - 自动解决事件 metadata 含 cause=segment_confirm 与 confirmedSegmentId；
+   * - 任一子写失败（含注入失败）整体回滚，零半成功事件；
+   * - 无实际变化（已确认且无 open 疑点且文本相同）→ 语义 no-op，不增长 revision。
+   */
+  confirmSegmentAndResolve(
+    projectId: string,
+    segmentId: string,
+    opts: { correctedText?: unknown },
+    expectedRevision: number | undefined,
+    client: AuditClientContext,
+  ): { segment: SegmentRecord; resolvedIssues: IssueRecord[]; revision: number; project: ProjectSummary } {
+    let correctedText: string | undefined;
+    if (opts.correctedText !== undefined) {
+      if (typeof opts.correctedText !== "string") {
+        throw new TypeError("correctedText 必须是字符串");
+      }
+      correctedText = opts.correctedText;
+    }
+    return this.transaction(() => {
+      const rev = this.assertRevision(projectId, expectedRevision);
+      const row = this.stmts.getSegment.get(segmentId) as Record<string, unknown> | undefined;
+      if (!row || row.project_id !== projectId) {
+        throw notFound(`字幕段不存在或不属于该项目：${segmentId}`);
+      }
+      const before = this.rowToSegment(row);
+      const now = Date.now();
+      const segmentChanged =
+        before.status !== "confirmed" || (correctedText !== undefined && correctedText !== before.correctedText);
+      const after: SegmentRecord = segmentChanged
+        ? {
+            ...before,
+            correctedText: correctedText ?? before.correctedText,
+            status: "confirmed",
+            revisionNo: before.revisionNo + 1,
+            updatedAt: now,
+          }
+        : before;
+      const changedFields = diffSegment(before, after);
+      // 该段全部 open 疑点，按稳定 issueId 顺序解决（同一确认时间）。
+      const openRows = this.db
+        .prepare(
+          "SELECT * FROM issues WHERE project_id = ? AND segment_id = ? AND status = 'open' ORDER BY issue_id ASC",
+        )
+        .all(projectId, segmentId) as unknown as Array<Record<string, unknown>>;
+      const resolvedIssues: IssueRecord[] = [];
+      const resolvedBefore: IssueRecord[] = [];
+      for (const issueRow of openRows) {
+        const issueBefore = this.rowToIssue(issueRow);
+        const issueAfter: IssueRecord = { ...issueBefore, status: "resolved", resolvedAt: now };
+        this.stmts.putIssue.run(
+          issueAfter.issueId,
+          issueAfter.projectId,
+          issueAfter.segmentId,
+          issueAfter.startMs,
+          issueAfter.endMs,
+          issueAfter.type,
+          issueAfter.severity,
+          issueAfter.note,
+          issueAfter.status,
+          issueAfter.createdAt,
+          issueAfter.resolvedAt,
+        );
+        resolvedBefore.push(issueBefore);
+        resolvedIssues.push(issueAfter);
+      }
+      if (!segmentChanged && resolvedIssues.length === 0) {
+        // 语义 no-op：段已确认、文本相同、无 open 疑点（不增长 revision、不产生事件）。
+        return {
+          segment: before,
+          resolvedIssues,
+          revision: rev,
+          project: this.rowToSummary(this.loadProjectRow(projectId)),
+        };
+      }
+      if (segmentChanged) {
+        this.stmts.updateSegment.run(after.correctedText, after.status, now, segmentId);
+        this.db
+          .prepare("UPDATE segments SET start_ms = ?, end_ms = ? WHERE segment_id = ?")
+          .run(after.startMs, after.endMs, segmentId);
+        // 确认端点固定产生 confirm_segment（changedFields 如实列出文本/状态差异）。
+        this.appendAudit({
+          projectId,
+          revision: rev + 1,
+          action: "confirm_segment",
+          objectType: "segment",
+          objectId: segmentId,
+          at: now,
+          client,
+          before: { ...before },
+          after: { ...after },
+          changedFields,
+          metadata: null,
+        });
+      }
+      for (const [index, resolved] of resolvedIssues.entries()) {
+        this.appendAudit({
+          projectId,
+          revision: rev + 1,
+          action: "resolve_issue",
+          objectType: "issue",
+          objectId: resolved.issueId,
+          at: now,
+          client,
+          before: { ...resolvedBefore[index] },
+          after: { ...resolved },
+          changedFields: ["status", "resolvedAt"],
+          // 稳定顺序（issueId 升序）+ 共享 revision/时间戳；标明确认来源。
+          metadata: { cause: "segment_confirm", confirmedSegmentId: segmentId, order: index },
+        });
+      }
+      this.stmts.bumpRevision.run(now, projectId);
+      return {
+        segment: after,
+        resolvedIssues,
+        revision: rev + 1,
+        project: this.rowToSummary(this.loadProjectRow(projectId)),
+      };
+    });
+  }
+
   putIssue(
     projectId: string,
     issueId: string,
@@ -1269,6 +1565,10 @@ export class SqliteProjectStore {
       this.db.prepare("DELETE FROM issues WHERE project_id = ?").run(projectId);
       this.db.prepare("DELETE FROM segments WHERE project_id = ?").run(projectId);
       this.db.prepare("DELETE FROM srt_source WHERE project_id = ?").run(projectId);
+      // V1.1.4：预筛 run/batch/candidate 随项目业务数据硬删除（PRD §4.4.5）。
+      this.db.prepare("DELETE FROM prefilter_candidates WHERE project_id = ?").run(projectId);
+      this.db.prepare("DELETE FROM prefilter_batches WHERE project_id = ?").run(projectId);
+      this.db.prepare("DELETE FROM prefilter_runs WHERE project_id = ?").run(projectId);
       this.db.prepare("DELETE FROM projects WHERE project_id = ?").run(projectId);
       // 删除摘要快照进 before；audit_events 行长期保留（§4.4.5/§4.4.6 四.4）。
       this.appendAudit({
@@ -1319,6 +1619,569 @@ export class SqliteProjectStore {
       const project = this.insertProjectTx(payload, Date.now(), client, "migrate");
       return { created: true, stale: false, revision: project.revision, project };
     });
+  }
+
+  // ---------- V1.1.4 机器文本预筛（PRD §3.4.9 / AC-069~071） ----------
+
+  /** 冻结的批输入段（只含 segmentId/cueNo/originalText/sourceTextHash，无 correctedText/音频）。 */
+  createPrefilterRun(
+    projectId: string,
+    opts: { provider: string; model: string; promptVersion: string; batchSize?: number },
+  ): { run: PrefilterRunSummary; created: boolean } {
+    return this.transaction(() => {
+      this.loadProjectRow(projectId);
+      // 冻结范围：未确认段、非空原文，按 startMs 升序（运行中新增/删除段不改本次总数）。
+      const rows = this.db
+        .prepare(
+          "SELECT * FROM segments WHERE project_id = ? AND status != 'confirmed' AND TRIM(original_text) != '' ORDER BY start_ms ASC, segment_id ASC",
+        )
+        .all(projectId) as unknown as Array<Record<string, unknown>>;
+      const inputs: PrefilterSegmentInput[] = rows.map((r) => ({
+        segmentId: r.segment_id as string,
+        cueNo: (r.cue_no as number | null) ?? null,
+        originalText: r.original_text as string,
+        sourceTextHash: sha256Hex(r.original_text as string),
+      }));
+      const scopeHash = sha256Hex(
+        inputs.map((i) => `${i.segmentId}${i.sourceTextHash}`).join("\n") +
+          `|${opts.provider}|${opts.model}|${opts.promptVersion}`,
+      );
+      // 复用：同 scope/provider/model/promptVersion 且未取消的既有 run。
+      const existing = this.db
+        .prepare(
+          "SELECT run_id FROM prefilter_runs WHERE project_id = ? AND scope_hash = ? AND provider = ? AND model = ? AND prompt_version = ? AND status IN ('queued','running','partial','completed')",
+        )
+        .get(projectId, scopeHash, opts.provider, opts.model, opts.promptVersion) as
+        | { run_id: string }
+        | undefined;
+      if (existing) return { run: this.getPrefilterRun(projectId, existing.run_id), created: false };
+
+      const runId = `pfr-${randomUuid()}`;
+      const now = Date.now();
+      const batchSize = Math.min(50, Math.max(1, opts.batchSize ?? 20));
+      const total = inputs.length;
+      const empty = total === 0;
+      this.db
+        .prepare(
+          "INSERT INTO prefilter_runs (run_id, project_id, status, provider, model, prompt_version, scope_hash, total, started_at, completed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          runId,
+          projectId,
+          empty ? "completed" : "queued",
+          opts.provider,
+          opts.model,
+          opts.promptVersion,
+          scopeHash,
+          total,
+          empty ? now : null,
+          empty ? now : null,
+          now,
+        );
+      for (let offset = 0; offset < total; offset += batchSize) {
+        const chunk = inputs.slice(offset, offset + batchSize);
+        const inputHash = sha256Hex(
+          chunk.map((i) => `${i.segmentId}${i.sourceTextHash}`).join("\n") +
+            `|${opts.provider}|${opts.model}|${opts.promptVersion}`,
+        );
+        this.db
+          .prepare(
+            "INSERT INTO prefilter_batches (batch_id, run_id, project_id, batch_no, input_hash, inputs_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)",
+          )
+          .run(
+            `pfb-${randomUuid()}`,
+            runId,
+            projectId,
+            Math.floor(offset / batchSize),
+            inputHash,
+            JSON.stringify(chunk),
+            now,
+          );
+      }
+      return { run: this.getPrefilterRun(projectId, runId), created: true };
+    });
+  }
+
+  getPrefilterRun(projectId: string, runId: string): PrefilterRunSummary {
+    const run = this.loadPrefilterRunRow(projectId, runId);
+    return this.rowToRunSummary(run);
+  }
+
+  /** P0-3：最近一次 run（只读发现；无 run 诚实返回 null，不创建、不触发模型）。 */
+  getLatestPrefilterRun(projectId: string): PrefilterRunSummary | null {
+    this.loadProjectRow(projectId);
+    const row = this.db
+      .prepare(
+        "SELECT run_id FROM prefilter_runs WHERE project_id = ? ORDER BY created_at DESC, run_id DESC LIMIT 1",
+      )
+      .get(projectId) as { run_id: string } | undefined;
+    if (!row) return null;
+    return this.getPrefilterRun(projectId, row.run_id);
+  }
+
+  /**
+   * 原子认领下一个待处理批次（AC-070 P0）：短事务 CAS（queued/failed → running），
+   * 并发第二请求不得认领同批、不得调用模型；同一 run 严格按 batch_no 顺序处理
+   * （首个未完成批正在被其他调用持有且未超租约 → 返回 null，不跳批并行）。
+   * - next 模式：认领首个 queued/failed（或租约过期的 running）；
+   * - retry 模式：只认领 failed（或租约过期的 running），成功批次绝不重调模型；
+   * - running 且未超租约：不抢仍在执行的正常模型调用；
+   * - 进程中断：close() 释放本实例认领；崩溃场景由租约超时回收。
+   */
+  claimPrefilterBatch(
+    projectId: string,
+    runId: string,
+    mode: "next" | "retry",
+  ): { batchId: string; batchNo: number; inputHash: string; inputs: PrefilterSegmentInput[] } | null {
+    return this.transaction(() => {
+      const run = this.loadPrefilterRunRow(projectId, runId);
+      // P0-4：终态 run（cancelled/completed）不可再 claim/调用模型——
+      // 取消竞态后的失败批、优雅关闭/重启都不复活已取消 run 的批次。
+      if (run.status === "cancelled" || run.status === "completed") return null;
+      const row = this.db
+        .prepare(
+          "SELECT batch_id, batch_no, input_hash, inputs_json, status, claimed_at FROM prefilter_batches WHERE run_id = ? AND status NOT IN ('succeeded','cancelled') ORDER BY batch_no ASC LIMIT 1",
+        )
+        .get(runId) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      const status = row.status as string;
+      const claimedAt = (row.claimed_at as number | null) ?? null;
+      const stale =
+        status === "running" &&
+        (claimedAt === null || Date.now() - claimedAt > SqliteProjectStore.PREFILTER_CLAIM_LEASE_MS);
+      if (status === "running" && !stale) return null; // 仍在正常执行：不抢
+      if (mode === "retry" && status === "queued") return null; // retry 只重试失败批次
+      // CAS 认领：仅当状态未被并发修改时生效（changes=1），否则竞争失败返回 null。
+      const result = this.db
+        .prepare(
+          "UPDATE prefilter_batches SET status = 'running', claimed_by = ?, claimed_at = ? WHERE batch_id = ? AND status = ?",
+        )
+        .run(this.instanceId, Date.now(), row.batch_id as string, status) as unknown as { changes: number };
+      if (result.changes !== 1) return null;
+      // P0-1（第 2 轮）：成功 claim 后在同一事务把 run 更新为 running、写 startedAt、
+      // 从终态（failed）重试进入非终态时清空旧 completedAt（终态时由 recompute 重写）。
+      this.db
+        .prepare(
+          `UPDATE prefilter_runs
+           SET status = 'running',
+               started_at = COALESCE(started_at, ?),
+               completed_at = CASE WHEN ? IN ('failed','partial') THEN NULL ELSE completed_at END
+           WHERE run_id = ?`,
+        )
+        .run(Date.now(), run.status as string, runId);
+      // recompute 同步计数（claim 本身不增 processed，但确保状态一致）。
+      this.recomputePrefilterRun(runId);
+      return {
+        batchId: row.batch_id as string,
+        batchNo: row.batch_no as number,
+        inputHash: row.input_hash as string,
+        inputs: JSON.parse(row.inputs_json as string) as PrefilterSegmentInput[],
+      };
+    });
+  }
+
+  /** inputHash 幂等：查找同项目其他已成功批次（不调用模型即可复用其结果）。 */
+  findReusableBatch(projectId: string, inputHash: string, excludeBatchId: string): string | null {
+    const row = this.db
+      .prepare(
+        "SELECT batch_id FROM prefilter_batches WHERE project_id = ? AND input_hash = ? AND status = 'succeeded' AND batch_id != ? LIMIT 1",
+      )
+      .get(projectId, inputHash, excludeBatchId) as { batch_id: string } | undefined;
+    return row?.batch_id ?? null;
+  }
+
+  /** 复制既有成功批次的结果到目标批次（同 inputHash 幂等复用，不调用模型）。 */
+  copyBatchResults(targetBatchId: string, sourceBatchId: string): void {
+    this.transaction(() => {
+      const target = this.loadPrefilterBatchRow(targetBatchId);
+      if (target.status === "succeeded") return; // 并发复制：目标已成功 → 幂等返回，不撞 UNIQUE
+      void sourceBatchId;
+      const candidates = this.db
+        .prepare("SELECT * FROM prefilter_candidates WHERE batch_id = ?")
+        .all(sourceBatchId) as unknown as Array<Record<string, unknown>>;
+      let reused = 0;
+      let rejected = 0;
+      for (const c of candidates) {
+        // created → 复用（关联同一 issue）；reused → 仍复用；rejected → 仍拒绝（无 issueId）。
+        const disposition = c.issue_id ? "reused" : "rejected";
+        if (c.issue_id) reused += 1;
+        else rejected += 1;
+        this.db
+          .prepare(
+            "INSERT INTO prefilter_candidates (run_id, batch_id, project_id, candidate_key, segment_id, issue_id, suspicious_text, type, suggestion, confidence, reason, source_text_hash, disposition, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            target.run_id as string,
+            targetBatchId,
+            target.project_id as string,
+            c.candidate_key as string,
+            c.segment_id as string,
+            (c.issue_id as string | null) ?? null,
+            c.suspicious_text as string,
+            c.type as string,
+            c.suggestion as string,
+            c.confidence as string,
+            c.reason as string,
+            c.source_text_hash as string,
+            disposition,
+            Date.now(),
+          );
+      }
+      this.db
+        .prepare(
+          "UPDATE prefilter_batches SET status = 'succeeded', attempt_count = attempt_count + 1, created_count = 0, reused_count = ?, rejected_count = ?, error_code = NULL, error_message = NULL WHERE batch_id = ?",
+        )
+        .run(reused, rejected, targetBatchId);
+      this.recomputePrefilterRun(target.run_id as string);
+    });
+  }
+
+  /**
+   * 短事务 materialize 已校验候选（模型调用不持有本事务，PRD §4.4.4 写入约定 8）：
+   * - candidateKey 项目级去重：既有候选（含已解决/已删除的 issue）→ reused，不建新疑点、不复活；
+   * - 新候选 → 创建 warning 级 machine_prefilter 疑点 + create_issue 审计
+   *   （source=machine_prefilter，metadata 含来源与候选键，不含提示词/密钥/整批正文）；
+   * - 同批重复 candidateKey 防御性跳过并计 reused（绝不撞唯一约束）；
+   * - 只有真正创建疑点才增长一次 revision。
+   */
+  materializePrefilterBatch(
+    batchId: string,
+    candidates: PrefilterMaterializeCandidate[],
+    machine: { provider: string; model: string; promptVersion: string; runId: string },
+    client: AuditClientContext,
+    rejectedCandidates: Array<PrefilterMaterializeCandidate & { why: string }> = [],
+  ): { createdCount: number; reusedCount: number; rejectedCount: number; revision: number } {
+    return this.transaction(() => {
+      const batch = this.loadPrefilterBatchRow(batchId);
+      const run = this.loadPrefilterRunRow(batch.project_id as string, batch.run_id as string);
+      if (batch.status === "succeeded") {
+        // 防御性幂等：批次已成功（如并发双击）→ 返回既有计数，不重复落库。
+        return {
+          createdCount: batch.created_count as number,
+          reusedCount: batch.reused_count as number,
+          rejectedCount: batch.rejected_count as number,
+          revision: this.currentRevision(batch.project_id as string),
+        };
+      }
+      const now = Date.now();
+      const revBefore = this.currentRevision(batch.project_id as string);
+      let createdCount = 0;
+      let reusedCount = 0;
+      /** rejected 候选行（含校验层拒绝与“冻结后段已确认”跳过；issueId 恒为 null）。 */
+      const rejectedRows: Array<PrefilterMaterializeCandidate & { why: string }> = [
+        ...rejectedCandidates,
+      ];
+      const seenInBatch = new Set<string>();
+      const seenRejectedKeys = new Set<string>();
+      for (const candidate of candidates) {
+        const candidateKey = candidateKeyOf(candidate);
+        if (seenInBatch.has(candidateKey)) {
+          reusedCount += 1; // 同批重复：跳过插入，绝不撞 UNIQUE(batch_id, candidate_key)
+          continue;
+        }
+        seenInBatch.add(candidateKey);
+        // 项目级 candidateKey 去重：已关联过疑点（含已解决/已删除）→ 复用，不重开/不复活。
+        const existing = this.db
+          .prepare(
+            "SELECT issue_id FROM prefilter_candidates WHERE project_id = ? AND candidate_key = ? AND issue_id IS NOT NULL LIMIT 1",
+          )
+          .get(batch.project_id as string, candidateKey) as { issue_id: string } | undefined;
+        if (existing) {
+          this.insertPrefilterCandidate(batch, run.run_id as string, candidate, candidateKey, existing.issue_id, "reused", now);
+          reusedCount += 1;
+          continue;
+        }
+        const seg = this.stmts.getSegment.get(candidate.segmentId) as Record<string, unknown> | undefined;
+        if (!seg || seg.project_id !== batch.project_id) {
+          // 校验层已保证 segmentId 属于批输入；此处为纵深防御（拒绝而非落库）。
+          continue;
+        }
+        if (seg.status === "confirmed") {
+          // 冻结后、materialize 前该段已被人工确认：不在已确认段上产生 open 机器疑点
+          //（保持“确认后疑点已清空”不变量，AC-068/069）；候选记 rejected、不改确认状态。
+          rejectedRows.push({ ...candidate, why: "segment_confirmed_after_freeze" });
+          continue;
+        }
+        const issueId = `mp-${randomUuid()}`;
+        const machineMetadata = {
+          origin: "machine_prefilter",
+          provider: machine.provider,
+          model: machine.model,
+          promptVersion: machine.promptVersion,
+          sourceTextHash: candidate.sourceTextHash,
+          runId: run.run_id,
+          batchId,
+          candidateKey,
+          confidence: candidate.confidence,
+          suspiciousText: candidate.suspiciousText,
+          suggestion: candidate.suggestion,
+          reason: candidate.reason,
+        };
+        this.db
+          .prepare(
+            "INSERT INTO issues (issue_id, project_id, segment_id, start_ms, end_ms, type, severity, note, status, created_at, resolved_at, origin, machine_metadata) VALUES (?, ?, ?, ?, ?, ?, 'warning', ?, 'open', ?, NULL, 'machine_prefilter', ?)",
+          )
+          .run(
+            issueId,
+            batch.project_id as string,
+            candidate.segmentId,
+            seg.start_ms as number,
+            seg.end_ms as number,
+            candidate.type,
+            candidate.reason,
+            now,
+            JSON.stringify(machineMetadata),
+          );
+        const storedRow = this.stmts.getIssue.get(issueId) as Record<string, unknown>;
+        const after = this.rowToIssue(storedRow);
+        this.appendAudit({
+          projectId: batch.project_id as string,
+          revision: revBefore + 1,
+          action: "create_issue",
+          objectType: "issue",
+          objectId: issueId,
+          at: now,
+          client: { clientId: client.clientId, source: "machine_prefilter" },
+          before: null,
+          after: { ...after },
+          changedFields: null,
+          // metadata 只含来源与候选键；提示词全文、密钥与整批正文绝不进入审计。
+          metadata: {
+            origin: "machine_prefilter",
+            provider: machine.provider,
+            model: machine.model,
+            promptVersion: machine.promptVersion,
+            sourceTextHash: candidate.sourceTextHash,
+            runId: run.run_id,
+            batchId,
+            candidateKey,
+            confidence: candidate.confidence,
+          },
+        });
+        this.insertPrefilterCandidate(batch, run.run_id as string, candidate, candidateKey, issueId, "created", now);
+        createdCount += 1;
+      }
+      if (createdCount > 0) {
+        this.stmts.bumpRevision.run(now, batch.project_id as string);
+      }
+      // 持久化 rejected 候选行（PRD 数据字典 disposition=rejected；issueId 恒为 null）。
+      // key 与有效候选的 candidateKey 分域（追加 why），绝不撞 UNIQUE(batch_id, candidate_key)。
+      for (const [rejectedIndex, rejected] of rejectedRows.entries()) {
+        // P1-2：index 参与键——同内容同理由的不同条目（如两条都缺 suggestion）不撞唯一约束。
+        const rejectedKey = sha256Hex(`${candidateKeyOf(rejected)}|rejected|${rejected.why}|${rejectedIndex}`);
+        if (seenRejectedKeys.has(rejectedKey)) continue;
+        seenRejectedKeys.add(rejectedKey);
+        this.db
+          .prepare(
+            "INSERT INTO prefilter_candidates (run_id, batch_id, project_id, candidate_key, segment_id, issue_id, suspicious_text, type, suggestion, confidence, reason, source_text_hash, disposition, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'rejected', ?)",
+          )
+          .run(
+            run.run_id as string,
+            batchId,
+            batch.project_id as string,
+            rejectedKey,
+            rejected.segmentId,
+            rejected.suspiciousText,
+            rejected.type,
+            rejected.suggestion,
+            rejected.confidence,
+            `${rejected.reason}（拒绝原因：${rejected.why}）`.slice(0, 500),
+            rejected.sourceTextHash,
+            now,
+          );
+      }
+      const rejectedCount = rejectedRows.length;
+      this.db
+        .prepare(
+          "UPDATE prefilter_batches SET status = 'succeeded', attempt_count = attempt_count + 1, created_count = ?, reused_count = ?, rejected_count = ?, error_code = NULL, error_message = NULL WHERE batch_id = ?",
+        )
+        .run(createdCount, reusedCount, rejectedCount, batchId);
+      this.recomputePrefilterRun(run.run_id as string);
+      return {
+        createdCount,
+        reusedCount,
+        rejectedCount,
+        revision: createdCount > 0 ? revBefore + 1 : revBefore,
+      };
+    });
+  }
+
+  /** 批次失败（模型/校验错误）：脱敏错误 + 尝试计数；不产生 issue/revision/审计污染。 */
+  markPrefilterBatchFailed(batchId: string, errorCode: string, errorMessage: string): void {
+    this.transaction(() => {
+      const batch = this.loadPrefilterBatchRow(batchId);
+      const message = errorMessage.slice(0, 500);
+      this.db
+        .prepare(
+          "UPDATE prefilter_batches SET status = 'failed', attempt_count = attempt_count + 1, error_code = ?, error_message = ? WHERE batch_id = ?",
+        )
+        .run(errorCode, message, batchId);
+      this.recomputePrefilterRun(batch.run_id as string);
+    });
+  }
+
+  /** 在批次边界取消：保留已成功候选，未开始批次转 cancelled，不伪装完成。 */
+  cancelPrefilterRun(projectId: string, runId: string): PrefilterRunSummary {
+    return this.transaction(() => {
+      const run = this.loadPrefilterRunRow(projectId, runId);
+      if (run.status !== "completed") {
+        this.db
+          .prepare("UPDATE prefilter_batches SET status = 'cancelled' WHERE run_id = ? AND status = 'queued'")
+          .run(runId);
+        this.db
+          .prepare(
+            "UPDATE prefilter_runs SET status = 'cancelled', completed_at = ? WHERE run_id = ?",
+          )
+          .run(Date.now(), runId);
+      }
+      return this.getPrefilterRun(projectId, runId);
+    });
+  }
+
+  private loadPrefilterRunRow(projectId: string, runId: string): Record<string, unknown> {
+    const run = this.db
+      .prepare("SELECT * FROM prefilter_runs WHERE run_id = ?")
+      .get(runId) as Record<string, unknown> | undefined;
+    if (!run || run.project_id !== projectId) {
+      throw notFound(`预筛 run 不存在或不属于该项目：${runId}`);
+    }
+    return run;
+  }
+
+  private loadPrefilterBatchRow(batchId: string): Record<string, unknown> {
+    const batch = this.db
+      .prepare("SELECT * FROM prefilter_batches WHERE batch_id = ?")
+      .get(batchId) as Record<string, unknown> | undefined;
+    if (!batch) throw notFound(`预筛批次不存在：${batchId}`);
+    return batch;
+  }
+
+  private insertPrefilterCandidate(
+    batch: Record<string, unknown>,
+    runId: string,
+    candidate: PrefilterMaterializeCandidate,
+    candidateKey: string,
+    issueId: string | null,
+    disposition: "created" | "reused",
+    now: number,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO prefilter_candidates (run_id, batch_id, project_id, candidate_key, segment_id, issue_id, suspicious_text, type, suggestion, confidence, reason, source_text_hash, disposition, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        runId,
+        batch.batch_id as string,
+        batch.project_id as string,
+        candidateKey,
+        candidate.segmentId,
+        issueId,
+        candidate.suspiciousText,
+        candidate.type,
+        candidate.suggestion,
+        candidate.confidence,
+        candidate.reason,
+        candidate.sourceTextHash,
+        disposition,
+        now,
+      );
+  }
+
+  /** 批次结束后重算 run 计数与状态（processed=已成功批次的段数；计数非负）。 */
+  private recomputePrefilterRun(runId: string): void {
+    const run = this.db
+      .prepare("SELECT * FROM prefilter_runs WHERE run_id = ?")
+      .get(runId) as Record<string, unknown> | undefined;
+    if (!run) return;
+    const batches = this.db
+      .prepare(
+        "SELECT status, inputs_json, created_count, reused_count, rejected_count FROM prefilter_batches WHERE run_id = ? ORDER BY batch_no ASC",
+      )
+      .all(runId) as unknown as Array<Record<string, unknown>>;
+    let processed = 0;
+    let created = 0;
+    let reused = 0;
+    let rejected = 0;
+    let failed = 0;
+    let queued = 0;
+    let running = 0;
+    let succeeded = 0;
+    for (const b of batches) {
+      if (b.status === "succeeded") {
+        succeeded += 1;
+        processed += (JSON.parse(b.inputs_json as string) as unknown[]).length;
+        created += b.created_count as number;
+        reused += b.reused_count as number;
+        rejected += b.rejected_count as number;
+      } else if (b.status === "failed") {
+        failed += 1;
+      } else if (b.status === "queued") {
+        queued += 1;
+      } else if (b.status === "running") {
+        running += 1;
+      }
+    }
+    const attempted = succeeded + failed;
+    let status: string;
+    if (run.status === "cancelled") {
+      // 取消竞态：当前批在取消后完成 materialize——run 保持 cancelled（不伪装完成），
+      // 计数与 completedAt 照常更新；当前批可落库，剩余批保持 cancelled。
+      status = "cancelled";
+    } else if (failed > 0) {
+      // P0-1：失败批优先——有成功为 partial，全部失败为 failed；不得被后续 queued 掩盖。
+      status = succeeded > 0 || queued > 0 || running > 0 ? "partial" : "failed";
+    } else if (running > 0 || queued > 0) {
+      status = attempted > 0 || running > 0 ? "running" : "queued";
+    } else if (succeeded > 0) status = "completed";
+    else status = "cancelled";
+    const terminal = queued === 0 && running === 0;
+    this.db
+      .prepare(
+        "UPDATE prefilter_runs SET status = ?, processed = ?, created_count = ?, reused_count = ?, rejected_count = ?, failed_batches = ?, started_at = COALESCE(started_at, ?), completed_at = CASE WHEN ? THEN COALESCE(completed_at, ?) ELSE completed_at END WHERE run_id = ?",
+      )
+      .run(status, processed, created, reused, rejected, failed, Date.now(), terminal ? 1 : 0, Date.now(), runId);
+  }
+
+  private rowToRunSummary(run: Record<string, unknown>): PrefilterRunSummary {
+    const batches = this.db
+      .prepare(
+        "SELECT * FROM prefilter_batches WHERE run_id = ? ORDER BY batch_no ASC",
+      )
+      .all(run.run_id as string) as unknown as Array<Record<string, unknown>>;
+    let processed = 0;
+    for (const b of batches) {
+      if (b.status === "succeeded") {
+        processed += (JSON.parse(b.inputs_json as string) as unknown[]).length;
+      }
+    }
+    return {
+      runId: run.run_id as string,
+      projectId: run.project_id as string,
+      status: run.status as string,
+      provider: run.provider as string,
+      model: run.model as string,
+      promptVersion: run.prompt_version as string,
+      total: run.total as number,
+      processed,
+      created: run.created_count as number,
+      reused: run.reused_count as number,
+      rejected: run.rejected_count as number,
+      failedBatches: run.failed_batches as number,
+      startedAt: (run.started_at as number | null) ?? null,
+      completedAt: (run.completed_at as number | null) ?? null,
+      batches: batches.map((b) => ({
+        batchId: b.batch_id as string,
+        batchNo: b.batch_no as number,
+        status: b.status as string,
+        attemptCount: b.attempt_count as number,
+        errorCode: (b.error_code as string | null) ?? null,
+        errorMessage: (b.error_message as string | null) ?? null,
+        createdCount: b.created_count as number,
+        reusedCount: b.reused_count as number,
+        rejectedCount: b.rejected_count as number,
+        segmentCount: (JSON.parse(b.inputs_json as string) as unknown[]).length,
+      })),
+    };
   }
 
   private validateSegmentShape(seg: Omit<SegmentRecord, "projectId" | "revisionNo" | "updatedAt">): void {

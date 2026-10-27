@@ -469,3 +469,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 @media (min-width: 1440px) {
   .wb-side { width: 360px; }
 }
+
+/* V1.1.4 机器文本预筛（PRD §3.4.9）：白底入口/面板与机器建议标识。 */
+.prefilter-entry { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.prefilter-panel {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.prefilter-panel .hint { margin: 0; }
+.prefilter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.status-chip.machine-chip { color: #681da8; background: var(--purple-soft); border: 1px solid #d9bdf7; }
+.machine-detail {
+  margin: 2px 0;
+  padding: 6px 8px;
+  background: var(--purple-soft);
+  border-radius: 6px;
+  white-space: pre-wrap;
+}

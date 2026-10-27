@@ -20,12 +20,44 @@ import {
 import type {
   IssueRecord,
   MediaInfo,
+  PrefilterConfigDto,
+  PrefilterRunDto,
   ProjectMeta,
   PlaybackState,
   SegmentRecord,
   SegmentStatus,
   SrtSourceRecord,
 } from "./types.js";
+
+/**
+ * V1.1.4 预筛仅在服务端后端可用（模型适配器与密钥都在服务端）。
+ * IndexedDB 测试后端诚实降级：配置返回不可用，其余操作明确报错——
+ * 不伪造模型结果，也不影响人工校对主链路。
+ */
+export async function getPrefilterConfig(): Promise<PrefilterConfigDto> {
+  return {
+    available: false,
+    provider: "indexeddb",
+    model: "（本地测试后端不支持预筛）",
+    promptVersion: "unsupported",
+  };
+}
+
+export async function createPrefilterRun(_projectId: string): Promise<PrefilterRunDto> {
+  void _projectId;
+  throw new Error("文本预筛仅支持服务端后端（本地 IndexedDB 后端不可用）。");
+}
+
+export async function getLatestPrefilterRun(_projectId: string): Promise<PrefilterRunDto | null> {
+  void _projectId;
+  return null; // 本地测试后端无预筛数据，诚实返回 null。
+}
+
+export async function getPrefilterRun(_projectId: string, _runId: string): Promise<PrefilterRunDto> {
+  void _projectId;
+  void _runId;
+  throw new Error("文本预筛仅支持服务端后端（本地 IndexedDB 后端不可用）。");
+}
 
 export class SourceImmutableError extends Error {
   constructor(message: string) {
@@ -192,6 +224,55 @@ export async function upsertIssue(issue: IssueRecord): Promise<void> {
   });
 }
 
+export interface ConfirmSegmentResult {
+  segment: SegmentRecord;
+  resolvedIssues: IssueRecord[];
+}
+
+/**
+ * V1.1.4 原子确认（AC-068，测试后端镜像）：单个 IndexedDB 事务中
+ * 把目标段改为 confirmed（可选应用 correctedText 草稿），并把该段全部 open 疑点
+ * 按稳定 issueId 顺序改为 resolved（同一确认时间）。任一步失败整体回滚。
+ */
+export async function confirmSegment(
+  segmentId: string,
+  opts: { correctedText?: string } = {},
+): Promise<ConfirmSegmentResult | undefined> {
+  let result: ConfirmSegmentResult | undefined;
+  await withStore([STORE_SEGMENTS, STORE_ISSUES], "readwrite", (stores) => {
+    const req = stores[STORE_SEGMENTS].get(segmentId);
+    req.onsuccess = () => {
+      const prev = req.result as SegmentRecord | undefined;
+      if (!prev) return;
+      const now = Date.now();
+      const segmentChanged =
+        prev.status !== "confirmed" ||
+        (opts.correctedText !== undefined && opts.correctedText !== prev.correctedText);
+      const next: SegmentRecord = segmentChanged
+        ? {
+            ...prev,
+            correctedText: opts.correctedText ?? prev.correctedText,
+            status: "confirmed",
+            revisionNo: prev.revisionNo + 1,
+            updatedAt: now,
+          }
+        : prev;
+      if (segmentChanged) stores[STORE_SEGMENTS].put(next);
+      const issueStore = stores[STORE_ISSUES];
+      const all = issueStore.index("bySegment").getAll(segmentId);
+      all.onsuccess = () => {
+        const open = (all.result as IssueRecord[])
+          .filter((i) => i.status === "open")
+          .sort((a, b) => (a.issueId < b.issueId ? -1 : 1));
+        const resolved = open.map((i) => ({ ...i, status: "resolved" as const, resolvedAt: now }));
+        for (const r of resolved) issueStore.put(r);
+        result = { segment: next, resolvedIssues: resolved };
+      };
+    };
+  });
+  return result;
+}
+
 export async function deleteIssue(issueId: string): Promise<void> {
   await withStore(STORE_ISSUES, "readwrite", (stores) => {
     stores[STORE_ISSUES].delete(issueId);
@@ -284,4 +365,22 @@ export function makeSegmentFromCue(
     correctedText: cue.text,
     status: "unreviewed",
   };
+}
+
+export async function prefilterNext(_projectId: string, _runId: string): Promise<{ run: PrefilterRunDto; revision: number; error: { code: string; message: string } | null; processed: boolean }> {
+  void _projectId;
+  void _runId;
+  throw new Error("文本预筛仅支持服务端后端（本地 IndexedDB 后端不可用）。");
+}
+
+export async function prefilterRetry(_projectId: string, _runId: string): Promise<{ run: PrefilterRunDto; revision: number; error: { code: string; message: string } | null; processed: boolean }> {
+  void _projectId;
+  void _runId;
+  throw new Error("文本预筛仅支持服务端后端（本地 IndexedDB 后端不可用）。");
+}
+
+export async function prefilterCancel(_projectId: string, _runId: string): Promise<PrefilterRunDto> {
+  void _projectId;
+  void _runId;
+  throw new Error("文本预筛仅支持服务端后端（本地 IndexedDB 后端不可用）。");
 }

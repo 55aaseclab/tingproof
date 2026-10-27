@@ -39,7 +39,9 @@ import {
 } from "../core/selection.js";
 import { randomUuid, sha256Hex } from "../core/identity.js";
 import {
+  confirmSegment,
   deleteIssue,
+  getProjectIssues,
   getSrtSource,
   relinkAudio,
   savePlayback,
@@ -48,6 +50,8 @@ import {
   upsertIssue,
 } from "../store/repo.js";
 import { SaveCoordinator, type SaveState } from "../store/saveCoordinator.js";
+import { applyIssueMerge, IssueSync } from "../store/issueSync.js";
+import { PrefilterPanel } from "./PrefilterPanel.js";
 import {
   type IssueRecord,
   type IssueSeverity,
@@ -96,6 +100,8 @@ export function Workbench({
   const [showExport, setShowExport] = useState(false);
   const [showKeymap, setShowKeymap] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+  /** V1.1.4 原子确认失败信息（段与疑点保持原状态，可重试；AC-068）。 */
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [tailGapMs, setTailGapMs] = useState<number | null>(null);
 
@@ -132,6 +138,10 @@ export function Workbench({
   const saveRef = useRef<SaveCoordinator | null>(null);
   if (!saveRef.current) saveRef.current = new SaveCoordinator(500);
   const save = saveRef.current;
+
+  // 保存状态订阅：失败时顶栏显示「保存失败（N 项未落盘）」并可重试；
+  // 确认意图的保护由 SaveCoordinator 的 EnqueuedOp token（isCurrent）实现——
+  // confirm 前置保存失败后仅当队列项仍是本 confirm token 时才降级为草稿保存。
   const [saveStatus, setSaveStatus] = useState<SaveState>(save.state);
   useEffect(() => save.subscribe(setSaveStatus), [save]);
   useEffect(() => () => save.dispose(), [save]);
@@ -503,35 +513,180 @@ export function Workbench({
   }, []);
 
   /**
-   * 行内确认 / Ctrl+Enter 确认（PRD V1.0.4）。
-   * - 行内（advance=false）：确认被点击的段，并把选中段/活动播放范围切换为「按钮所在行」，
-   *   不自动播放、不 seek（播放头保持原位，PRD 90a17ac）、不跳到下一段。
-   * - Ctrl+Enter（advance=true）：确认当前选中段，选择下一未校对段并精确定位其 start_ms、
-   *   聚焦其编辑框；不自动播放。
+   * P0-1（第 6 轮）：confirm 降级为普通草稿保存的辅助函数。
+   * 在执行时读取 draftsRef/sortedRef 最新值（不闭包捕获旧 textToSend/status），
+   * 不覆盖后续输入、新确认或同 label 新 op。
    */
+  const downgradeConfirmToDraftSave = useCallback(
+    (segmentId: string) => {
+      const seg = sortedRef.current.find((x) => x.segmentId === segmentId);
+      if (!seg) return;
+      save.enqueue(`segment:${segmentId}`, async () => {
+        const segAtRun = sortedRef.current.find((x) => x.segmentId === segmentId);
+        const draftAtRun = draftsRef.current.get(segmentId);
+        if (!segAtRun) return;
+        await updateSegment(segmentId, {
+          correctedText: draftAtRun ?? segAtRun.correctedText,
+          status: segAtRun.status,
+        });
+      });
+    },
+    [save],
+  );
+
+  /**
+   * 行内确认 / Ctrl+Enter 确认（PRD V1.0.4；V1.1.4 原子化，AC-068 + 主审计 P0-2 第 5/6 轮）。
+   * - 一次服务端原子事务：确认目标段（含 pending 草稿文本）并解决本段全部 open 疑点；
+   * - P0-2（第 5 轮）：入队返回不可伪造的 EnqueuedOp token；
+   *   confirm 自身失败后仅当队列项仍是该 token 时才替换为草稿保存（不覆盖后续输入/新确认）；
+   *   前置 op 失败后的 flush().then 也仅当 token 仍 current 时替换；
+   *   confirm 已成功而其他 op 后失败时不显示"确认被阻止"、不重新入队。
+   * - P0-1（第 6 轮）：降级时在执行时读取最新 draftsRef/segmentsRef 值。
+   */
+  // ---------- issues 并发保护（P0-1 第 9 轮）：IssueSync 协调器（src/store/issueSync.ts） ----------
+  // 设计与可证明的不变量见 issueSync.ts 头注。要点：
+  // - per-ID pending token：旧保存在途→新 mutation→旧保存成功不会清新 mutation 的 pending；
+  // - confirm 原子结果不进 pending，只保护 confirm 发生时在途的旧读（非永久保护）；
+  // - 冻结决策在响应到达时同步执行（React 更新器延迟执行，finally 清理先于更新器——
+  //   更新器内不得读 journal）；
+  // - 服务端缺失的本地项：仅 touched/pending 保留，否则视为跨设备删除事实删除本地。
+
+  const [issuesRefreshError, setIssuesRefreshError] = useState<string | null>(null);
+  /** issues 状态的同步只读镜像（渲染时同步；必须在 refreshIssues 声明前）。 */
+  const issuesRef = useRef(issues);
+  issuesRef.current = issues;
+
+  const issueSyncRef = useRef<IssueSync | null>(null);
+  if (issueSyncRef.current === null) issueSyncRef.current = new IssueSync();
+  const issueSync = issueSyncRef.current;
+
+  /**
+   * confirmSegment 原子返回的 resolvedIssues：服务端已落盘，不进 pending；
+   * 若该 ID 有更晚的本地 pending mutation（第 10 轮 P0-1），保留其条目与 token。
+   */
+  const noteIssueConfirmed = useCallback(
+    (...issueIds: string[]) => {
+      issueSync.noteConfirmed(...issueIds);
+    },
+    [issueSync],
+  );
+
+  /** 在 issue 保存 op 内捕获 per-ID token；ack 仅当 token 仍是最新时生效。 */
+  const captureIssueSaveToken = useCallback(
+    (issueId: string) => issueSync.captureSaveToken(issueId),
+    [issueSync],
+  );
+
+  /** 本地 issue mutation（create/resolve/delete）：写 per-ID journal + 分配新 pending token。 */
+  const noteIssueMutation = useCallback(
+    (...issueIds: string[]) => {
+      issueSync.noteMutation(...issueIds);
+    },
+    [issueSync],
+  );
+
+  const refreshIssues = useCallback(async () => {
+    const read = issueSync.beginRead();
+    try {
+      const latest = await getProjectIssues(meta.projectId);
+      if (!issueSync.isLatestRead(read.gen)) {
+        issueSync.endRead(read.gen);
+        return; // 旧读不覆盖新读（反序返回整体丢弃）
+      }
+      // 响应到达时同步冻结决策——更新器延迟执行，不得在其中读 journal。
+      const decisions = issueSync.freezeDecisions(
+        read,
+        latest.map((i) => i.issueId),
+        issuesRef.current.map((i) => i.issueId),
+      );
+      setIssues((prev) => applyIssueMerge(decisions, latest, prev));
+      setIssuesRefreshError(null);
+    } catch (err) {
+      if (issueSync.isLatestRead(read.gen)) {
+        setIssuesRefreshError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      issueSync.endRead(read.gen);
+    }
+  }, [meta.projectId, issueSync]);
+
   const applyConfirm = useCallback(
     (segmentId: string, opts: { advance: boolean }) => {
-      // 确认为低频动作：点击时构造单段草稿覆盖（不逐键全量 map），
-      // 保证“清空后确认被阻止、输入后确认被放行”都与最新草稿一致（第 13 轮审计 P0）。
       const draft = draftsRef.current.get(segmentId);
       const plan = planConfirm(sortedRef.current, segmentId, draft);
       if (!plan.ok) {
         window.alert(plan.reason);
         return;
       }
-      setStatus(plan.confirmedId, "confirmed");
-      if (opts.advance) {
-        if (plan.nextId) {
-          selectSegment(plan.nextId, { locate: true, pauseIfPlaying: true });
-          setFollow(true);
-          focusSegmentEditor(plan.nextId);
+       const target = sortedRef.current.find((s) => s.segmentId === plan.confirmedId);
+      const textToSend = draft ?? target?.correctedText;
+      setConfirmError(null);
+      let confirmSucceeded = false;
+      // 入队 confirm op，获取不可伪造的队列项身份。
+      const enqueued = save.enqueue(`segment:${plan.confirmedId}`, async () => {
+        try {
+          const result = await confirmSegment(plan.confirmedId, { correctedText: textToSend });
+          if (!result) return;
+          confirmSucceeded = true;
+          const resolvedIds = new Set(result.resolvedIssues.map((i) => i.issueId));
+          // confirmSegment 返回的 resolvedIssues：服务端已原子落盘，登记 confirmed 条目。
+          // 第 10 轮 P0-1：若该 ID 有更晚的本地 pending mutation（确认在途期间用户又
+          // create/resolve/delete），noteConfirmed 保留其 local 条目与 token，不覆盖/不 ack。
+          if (resolvedIds.size > 0) {
+            noteIssueConfirmed(...resolvedIds);
+          }
+          // P0-2（第 7 轮）：仅当 confirm token 仍 current 时才应用段级覆盖（draft 删除、
+          // canonical segment 覆盖、自动前进/聚焦）。token 已被后续输入替换（T1→T2）时：
+          // resolvedIssues 始终安全应用（服务端已原子确认），但绝不删除最新 draft、
+          // 绝不覆盖最新本地文字/状态、绝不执行旧确认自动前进。
+          if (enqueued.isCurrent()) {
+            draftsRef.current.delete(plan.confirmedId);
+            setSegments((prev) =>
+              prev.map((s) => (s.segmentId === result.segment.segmentId ? result.segment : s)),
+            );
+            if (opts.advance) {
+              if (plan.nextId) {
+                selectSegment(plan.nextId, { locate: true, pauseIfPlaying: true });
+                setFollow(true);
+                focusSegmentEditor(plan.nextId);
+              }
+            } else {
+              selectSegment(plan.confirmedId, {});
+            }
+          }
+          // resolvedIssues 始终应用（无论 token 是否 current——服务端已原子确认）。
+          if (resolvedIds.size > 0) {
+            setIssues((prev) =>
+              prev.map((i) => {
+                if (!resolvedIds.has(i.issueId)) return i;
+                const fresh = result.resolvedIssues.find((r) => r.issueId === i.issueId);
+                return fresh ?? { ...i, status: "resolved" };
+              }),
+            );
+          }
+        } catch (err) {
+          setConfirmError(
+            `确认失败：${err instanceof Error ? err.message : String(err)}（段落与疑点未变化，可重试）`,
+          );
+          // P0-2（第 5 轮）+ P0-1（第 6 轮）：仅当队列项仍是本 confirm token 时降级；
+          // 降级 op 在执行时读取最新值。
+          if (enqueued.isCurrent()) {
+            downgradeConfirmToDraftSave(plan.confirmedId);
+          }
+          throw err;
         }
-      } else {
-        // 选中目标 = 按钮所在行；绝不选择 plan.nextId；播放头保持原位（不 seek）。
-        selectSegment(plan.confirmedId, {});
-      }
+      });
+      // P0-2（第 5 轮）+ P0-1（第 6 轮）：flush 后检查——仅当 confirm 尚未执行且
+      // 队列项仍是本 token 时才降级为草稿保存（执行时读最新值）。
+      // confirm 已成功（confirmSucceeded）或其他 op 失败均不触发。
+      void save.flush().then(() => {
+        if (save.state.state === "failed" && !confirmSucceeded && enqueued.isCurrent()) {
+          downgradeConfirmToDraftSave(plan.confirmedId);
+          setConfirmError("前置保存失败，确认已被阻止。请先重试保存成功后再点击「确认本段」。");
+        }
+      });
     },
-    [setStatus, focusSegmentEditor, selectSegment],
+    [save, downgradeConfirmToDraftSave, focusSegmentEditor, selectSegment],
   );
 
   /** 稳定行内确认回调：父渲染不产生新函数，保住 SegmentRow 的 memo 跳过（第 10 轮审计 1）。 */
@@ -540,9 +695,39 @@ export function Workbench({
     [applyConfirm],
   );
 
-  /** 点击条目 / 聚焦文本框 / Alt+←→ / 回到播放点：选中 + 精确定位 startMs；播放中先暂停；不自动播放。 */
+  /** 点击条目 / Alt+←→ / 回到播放点：选中 + 精确定位 startMs；播放中先暂停；不自动播放。
+   *  聚焦文本框走 handleEditorFocus（当前播放段只精确暂停记续播点，其他段才定位段首）。 */
   const handleRowLocate = useCallback(
     (segmentId: string) => {
+      selectSegment(segmentId, { locate: true, pauseIfPlaying: true });
+      setFollow(true);
+    },
+    [selectSegment],
+  );
+
+  /**
+   * V1.1.4 编辑打断精确续播（AC-067）：聚焦校对文本框与行空白区点击语义分离——
+   * 当前选中段正在播放时聚焦其文本框 → 只在精确打断位置暂停（不 seek、不回段首），
+   * 记录一次性无回退续播点；聚焦其他段仍按既有规则（暂停旧段、切换选中并定位新段段首）；
+   * 行空白区点击始终走 handleRowLocate（AC-041 精确定位段首不受影响）。
+   */
+  const handleEditorFocus = useCallback(
+    (segmentId: string) => {
+      const seg = sortedRef.current.find((s) => s.segmentId === segmentId);
+      const a = audioRef.current;
+      const r = playerRef.current.range;
+      const playingThisSegment =
+        !!seg &&
+        !!a &&
+        !a.paused &&
+        !!r &&
+        r.startMs === seg.startMs &&
+        r.endMs === seg.endMs &&
+        selectedIdRef.current === segmentId;
+      if (playingThisSegment) {
+        playerRef.current.pauseForEdit();
+        return;
+      }
       selectSegment(segmentId, { locate: true, pauseIfPlaying: true });
       setFollow(true);
     },
@@ -628,7 +813,7 @@ export function Workbench({
     return value;
   }, [segments]);
 
-  /** 底部播放按钮与 F8 共用：对当前选中段做范围感知播放/暂停切换。 */
+  /** F8 与行内播放/暂停按钮共用：对当前选中段做范围感知播放/暂停切换（底部无重复按钮）。 */
   const handleMainToggle = useCallback(() => {
     const seg = sortedRef.current.find((s) => s.segmentId === selectedIdRef.current);
     if (!seg) return;
@@ -660,6 +845,15 @@ export function Workbench({
     () => buildUnresolvedBySegment(unresolved),
     [unresolved],
   );
+  const machineBySegment = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const issue of unresolved) {
+      if (issue.origin === "machine_prefilter") {
+        map.set(issue.segmentId, (map.get(issue.segmentId) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [unresolved]);
 
   const createIssue = useCallback(
     (segmentId: string, type: IssueType, severity: IssueSeverity, note: string) => {
@@ -679,10 +873,13 @@ export function Workbench({
         resolvedAt: null,
       };
       setIssues((prev) => [...prev, issue]);
+      noteIssueMutation(issue.issueId); // per-ID token：保存成功前任何 GET 不得覆盖本地结果
       save.enqueue(`issue:${issue.issueId}`, async () => {
+        const ackThisSave = captureIssueSaveToken(issue.issueId);
         const latest = issuesRef.current.find((i) => i.issueId === issue.issueId);
         if (!latest) return; // 已被删除：跳过
         await upsertIssue(latest);
+        ackThisSave(); // 保存成功：仅当 token 仍是最新时才 ack
       });
       if (seg.status !== "confirmed") {
         setSegments((prev) =>
@@ -722,19 +919,19 @@ export function Workbench({
     [setStatus, selectSegment],
   );
 
-  const issuesRef = useRef(issues);
-  issuesRef.current = issues;
-
   const resolveIssue = useCallback(
     (issueId: string) => {
       const issue = issuesRef.current.find((i) => i.issueId === issueId);
       if (!issue) return;
       const resolved: IssueRecord = { ...issue, status: "resolved", resolvedAt: Date.now() };
       setIssues((prev) => prev.map((i) => (i.issueId === issueId ? resolved : i)));
+      noteIssueMutation(issueId); // per-ID token：保存成功前任何 GET 不得覆盖本地结果
       save.enqueue(`issue:${issueId}`, async () => {
+        const ackThisSave = captureIssueSaveToken(issueId);
         const latest = issuesRef.current.find((i) => i.issueId === issueId);
         if (!latest) return;
         await upsertIssue(latest);
+        ackThisSave();
       });
       const stillOpen = issuesRef.current.some(
         (i) => i.segmentId === issue.segmentId && i.issueId !== issueId && i.status === "open",
@@ -758,11 +955,14 @@ export function Workbench({
     (issueId: string) => {
       const issue = issuesRef.current.find((i) => i.issueId === issueId);
       setIssues((prev) => prev.filter((i) => i.issueId !== issueId));
+      noteIssueMutation(issueId); // per-ID token：保存成功前任何 GET 不得覆盖本地结果
       save.enqueue(`issue:${issueId}`, async () => {
+        const ackThisSave = captureIssueSaveToken(issueId);
         // 删除前重新确认仍在库中语义：直接 delete（幂等）。
         const stillThere = issuesRef.current.some((i) => i.issueId === issueId);
         if (stillThere) return; // 已被撤销/重建：跳过
         await deleteIssue(issueId);
+        ackThisSave();
       });
       if (issue) {
         const stillOpen = issuesRef.current.some(
@@ -959,6 +1159,12 @@ export function Workbench({
           未解决疑点 {unresolved.length}
         </span>
         <span className="spacer" />
+        <PrefilterPanel
+          projectId={meta.projectId}
+          onIssuesChanged={refreshIssues}
+          flushSaves={() => save.flush()}
+          getSaveState={() => save.state}
+        />
         <button onClick={() => setShowKeymap((v) => !v)}>
           快捷键（<Kbd label={keymap.playPause} /> 播放）
         </button>
@@ -970,6 +1176,21 @@ export function Workbench({
 
       {showKeymap && <KeymapBar keymap={keymap} onClose={() => setShowKeymap(false)} />}
       {appError && <div className="notice-err" style={{ padding: "6px 14px" }}>✖ {appError}</div>}
+      {confirmError && (
+        <div className="notice-err" style={{ padding: "6px 14px" }} role="alert">✖ {confirmError}</div>
+      )}
+      {issuesRefreshError && (
+        <div className="notice-err" style={{ padding: "6px 14px" }} role="alert">
+          ✖ 读取最新疑点失败：{issuesRefreshError}
+          <button
+            style={{ marginLeft: 8 }}
+            onClick={() => void refreshIssues()}
+            title="只重新读取疑点列表，不会重跑预筛模型"
+          >
+            重试读取疑点
+          </button>
+        </div>
+      )}
       {audioNotice && !audioFile && (
         <div className="notice-warn" style={{ padding: "6px 14px" }}>
           ⚠ {audioNotice}
@@ -992,12 +1213,14 @@ export function Workbench({
               segments={sortedSegments}
               selectedId={selectedId}
               unresolvedBySegment={unresolvedBySegment}
+              machineCountBySegment={machineBySegment}
               onDraftChange={editSegment}
               onCompositionStart={onCompositionStart}
               onCompositionEnd={onCompositionEnd}
               onConfirmRow={handleRowConfirm}
               onUnconfirmRow={unconfirmSegment}
               onLocate={handleRowLocate}
+              onEditorFocus={handleEditorFocus}
               renderProbe={segmentRenderProbe}
               onTogglePlay={handleRowTogglePlay}
               onSkipBack={handleRowSkipBack}

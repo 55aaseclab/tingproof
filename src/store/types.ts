@@ -33,6 +33,9 @@ export interface SegmentRecord {
 
 export type IssueStatus = "open" | "resolved";
 export type IssueSeverity = "blocking" | "warning";
+
+/** V1.1.4 疑点来源：人工创建或机器预筛建议（旧数据/旧客户端缺省视为 human）。 */
+export type IssueOrigin = "human" | "machine_prefilter";
 export type IssueType =
   | "unclear" // 听不清
   | "homophone" // 同音词
@@ -66,6 +69,10 @@ export interface IssueRecord {
   status: IssueStatus;
   createdAt: number;
   resolvedAt: number | null;
+  /** V1.1.4：疑点来源（服务端控制；人工写路径不可设置）。缺省视为 human。 */
+  origin?: IssueOrigin;
+  /** V1.1.4 机器建议元数据（provider/model/promptVersion/runId/batchId/candidateKey/confidence/可疑片段/建议写法）。 */
+  machineMetadata?: Record<string, unknown> | null;
 }
 
 export interface MediaInfo {
@@ -144,4 +151,45 @@ export interface AuditEventRecord {
   /** 实际发生变化字段名列表；创建/删除动作为 null。 */
   changedFields: string[] | null;
   metadata: Record<string, unknown> | null;
+}
+
+// ---------- V1.1.4 机器文本预筛（PRD §3.4.9 / AC-069~071） ----------
+
+/** 浏览器可见的预筛配置（绝不包含 API key、Authorization 或敏感 base URL）。 */
+export interface PrefilterConfigDto {
+  available: boolean;
+  provider: string;
+  model: string;
+  promptVersion: string;
+}
+
+export interface PrefilterBatchDto {
+  batchId: string;
+  batchNo: number;
+  status: string;
+  attemptCount: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdCount: number;
+  reusedCount: number;
+  rejectedCount: number;
+  segmentCount: number;
+}
+
+export interface PrefilterRunDto {
+  runId: string;
+  projectId: string;
+  status: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  total: number;
+  processed: number;
+  created: number;
+  reused: number;
+  rejected: number;
+  failedBatches: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  batches: PrefilterBatchDto[];
 }

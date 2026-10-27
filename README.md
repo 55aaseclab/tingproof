@@ -1,25 +1,26 @@
-# 听校（TingProof）V0.1 纵向样机（第 8 轮：删除历史记录）
+# 听校（TingProof）V0.1 纵向样机（第 9 轮：V1.1.4 真实标注反馈与文本预筛）
 
 由服务端项目空间承载、可从多个设备访问的长音频人工听校工作台——最小完整闭环：
 
 > 导入 MP3 + SRT → 边听边校（播放 / 变速 / 自动回退 / 循环）→ 自动保存与恢复 → 标记疑点 → 导出 SRT 并回读校验。
 
-对应 [`docs/听校_PRD_V1.0.0.md`](docs/听校_PRD_V1.0.0.md) 的 V0.1 范围（PRD 2.4：单文件纵向样机；当前文档版本 V1.1.3）。
+对应 [`docs/听校_PRD_V1.0.0.md`](docs/听校_PRD_V1.0.0.md) 的 V0.1 范围（PRD 2.4：单文件纵向样机；当前文档版本 V1.1.4）。
 
 产品文档均随独立仓库保存在 `docs/`：
 
-- [产品需求文档（PRD，当前 V1.1.3）](docs/听校_PRD_V1.0.0.md)
+- [产品需求文档（PRD，当前 V1.1.4）](docs/听校_PRD_V1.0.0.md)
 - [待确认项清单](docs/听校_待确认项清单_V1.0.0.md)
 - [Q4 版本路线图](docs/1025-Q4路线图.html)
 
-第 3–8 轮审计已全部完成并纳入本版，要点：
+第 3–9 轮审计已全部完成并纳入本版，要点：
 
 - **第 3 轮（数据与行为）**：v1→v2 数据迁移（清除遗留音频正文并补指纹）、保存协调器丢写修复、导航/重定位前强制落盘、播放速率真实恢复、暂停即时持久化、旧项目音频重连策略、界面纯白底；
 - **第 4 轮（并发与依赖）**：SaveCoordinator 并发 flush 改为 join 语义、播放→选中订阅只依赖稳定引用（纯 render 不覆盖显式选中）、周期持久化计时器不随 render 重置；
 - **第 5 轮（真实浏览器布局验收）**：≤1100px/900×900 下列表与疑点栏上下分区、互不重叠、各自独立滚动；内联 data URI favicon 消除 /favicon.ico 404；
 - **第 6 轮（ground-truth 富审计，PRD V1.1.1）**：服务端 `audit_events` 升级为可还原人工标注过程的追加式富审计日志——结构化 before/after/changedFields/metadata、疑点与字幕段动作分类、持久非实名客户端来源、只读分页查询 API、旧 SQLite 库原地幂等迁移（PRAGMA user_version schema 版本）；本轮不做审计 UI，接口与数据库即为 ground-truth 导出通道（AC-058 至 AC-065）；
 - **第 7 轮（主审计复验修正，PRD V1.1.2）**：钉死富审计契约的精确语义并补对抗/探针回归——语义 no-op 不写对象/不增长 revision/不产生事件（含 media 分阶段补丁净 no-op，changedFields 按最终前后值一次性计算且绝不重复）、疑点 after 与返回值取数据库 canonical 行、createdAt 创建后不可变、issue_id 全局主键隔离（跨项目写入 404；导入碰撞与同一载荷内重复 issueId 均整体回滚，create_project 快照 issueCount 与主表一致）、schema 版本只进不退（未来版本拒绝打开）、数据库 open 后任意初始化失败统一释放句柄后原样重抛、损坏的非 NULL 审计 JSON 查询明确失败。
-- **第 8 轮（删除历史记录，PRD V1.1.3 / AC-066）**：导入页最近项目每条在「打开」旁新增「删除」按钮（danger 样式，白底不变）；行内二次确认（文案明确不可撤销且不删本机 MP3/SRT 源文件），确认后经服务端 `deleteProject` 在同一事务删除项目行、SRT、segments、issues 与播放进度，条目从所有访问同一服务的设备消失；删除期间仅目标条目禁用、删到 0 条显示空状态；失败保留可重试——409 版本冲突只安全刷新 revision（绝不自动重试删除），由用户再次点击「删除」并二次确认后以最新版本删除；迟到的旧列表响应不得复活已删除条目（请求代次 + 删除失效保护）；`delete_project` 审计行按 V1.1.2 契约长期保留，不新增审计删除接口。
+- **第 8 轮（删除历史记录，PRD V1.1.3 / AC-066）**：导入页最近项目每条在「打开」旁新增「删除」按钮（danger 样式，白底不变）；行内二次确认（文案明确不可撤销且不删本机 MP3/SRT 源文件），确认后经服务端 `deleteProject` 在同一事务删除项目行、SRT、segments、issues、播放进度与预筛数据，条目从所有访问同一服务的设备消失；删除期间仅目标条目禁用、删到 0 条显示空状态；失败保留可重试——409 版本冲突只安全刷新 revision（绝不自动重试删除），由用户再次点击「删除」并二次确认后以最新版本删除；迟到的旧列表响应不得复活已删除条目（请求代次 + 删除失效保护）；`delete_project` 审计行按 V1.1.2 契约长期保留，不新增审计删除接口。
+- **第 9 轮（V1.1.4 真实标注反馈与文本预筛，AC-067 至 AC-071）**：一、编辑打断精确续播——当前段播放中聚焦其文本框只在精确打断位置暂停（不回段首），下一次播放从该点无回退续播，标记一次性消费（play 成功起播后消费、reject 保留重试；seek/±2s/换段/段尾/循环/时间轴变化清除；行空白区点击仍是精确定位段首，两语义分离）；二、原子确认——行内确认与 Ctrl+Enter 一次服务端事务确认段（含 pending 草稿）并解决本段全部 open 疑点，revision 只增长一次，审计为 confirm_segment + 稳定顺序 resolve_issue（共享 revision/时间，metadata.cause=segment_confirm），撤销不重开，任一子写失败整体回滚；三、机器文本可疑点预筛——服务端只读不可变 originalText（绝不发送音频/correctedText），OpenAI-compatible 服务端环境配置（`TINGPROOF_LLM_BASE_URL/MODEL/API_KEY`，密钥绝不回传浏览器/入库/入日志），严格结构化输出白名单校验（未知顶层/未知字段/未知 ID/非原文子串/非法类型/超长/单段第 4 条/批内重复全部拒绝并计数、持久化 rejected 行），合法候选落为 warning 级 `machine_prefilter` 疑点（机器来源/置信度/可疑片段/建议/理由可见，不自动改稿不自动确认），批次原子认领（并发只调一次模型）、inputHash 幂等复用、失败续跑/重试/取消、服务重启恢复、已删除/已解决候选不复活不重开、冻结后已确认段不产生 open 机器疑点，审计 source=machine_prefilter 且 metadata 完整脱敏，模型未配置/失败时人工链路完全可用；四、第 9-10 轮复审并发收尾——疑点刷新并发协调重做为独立协调器（per-mutation pending token、confirm 原子结果不覆盖更晚的本地 pending mutation 且非永久保护、合并决策同步冻结、跨设备删除同步、journal 无泄漏清理），预筛 latest 错误恢复与 cancel 后迟到批次只读同步最终计数（cancel 响应两种到达顺序均恰好一次 latest、不轮询、不覆盖新 run、旧迟到不清新错误），Ctrl+Enter 与行内确认的在途竞态以真实键盘/deferred 时序锁定。
 
 逐轮明细与测试证据见 §5。
 
@@ -49,13 +50,13 @@ npm run serve        # 独立生产服务（先 build），静态 dist + /api，
 
 ### 本轮已自动化验证的结果（2026-10-26，主审计复验环境 Node 24.22.1）
 
-以下 `npm run lint`（tsc + eslint）、`npm test`（32 文件 283 用例）与 `npm run build` 均由主审计在 Node 24.22.1 实际复验通过：
+以下 `npm run lint`（tsc + eslint）、`npm run build` 均由主审计在 Node 24.22.1 实际复验通过（当时基线 32 文件 283 用例；当前门禁数字见下方测试表）：
 
 | 命令 | 结果 |
 | --- | --- |
 | `git diff --check` | 通过（无空白错误） |
 | `npm run lint`（tsc + eslint） | 通过，0 错误 |
-| `npm test` | 33 个文件 **295 个用例全部通过**（含既有播放/编辑/疑点/确认/滚动回归，服务端双客户端共享、重启持久化、409 冲突、幂等迁移和 0.0.0.0 配置，ground-truth 富审计全套，以及本轮删除历史记录：双按钮/取消零调用/只删目标项/空状态/失败保留可重试/防重复、409 冲突（不自动重删+安全刷新+再次确认成功；刷新失败列表不清空）、迟到旧列表响应无幽灵条目（并发删除）、>20 条分页边界，remote 删除集成与 409 对抗——业务行消失、delete_project 审计保留、源文件零触碰） |
+| `npm test` | 44 个文件 **415 个用例全部通过**（含既有播放/编辑/疑点/确认/滚动/删除回归，ground-truth 富审计全套，以及本轮 V1.1.4：编辑打断精确续播（播放器 10 例 + Workbench 接线 3 例，含 play reject 保留/ended 清理/语义分离）、原子确认（服务端 7 例含 SQL trigger 注入回滚 + idbRepo 3 例 + Workbench 8 例 + 失败路径 1 例 + 保存保护 1 例 + 队列项身份 3 例 + 快照跳过 2 例 + deferred 竞态 3 例：行内 advance:false 与 Ctrl+Enter advance:true 双路径精确保存 T2/不前进/不确认 + flush 快照跳过）、文本预筛（服务端 34 例：输入/校验/幂等/恢复/并发 claim/取消竞态/审计脱敏/迁移中间态/适配器重试，客户端 UI 23 例 + deferred 竞态 10 例：降级/循环/重试/取消/机器建议展示/latest 错误恢复 2 例/取消后迟到批次同步 3 例含 cancel 响应反序）、疑点刷新并发协调（协调器单测 11 例 + 真实 deferred 竞态 9 例：双 GET 并发反序/pending 中 create-resolve-delete 各自等待保存真正成功/保存 pending 保护/旧 ack 不清新 mutation/confirm 保护与非永久 pending/confirm 在途本地删除在保存失败时不被服务端旧行复活/跨设备删除）） |
 | `npm run build` | 成功 |
 | 组合服务 | `0.0.0.0:5173` 监听通过；页面与 `/api/projects` 经 localhost 和局域网地址均返回 HTTP 200 |
 
@@ -88,10 +89,10 @@ textarea 聚焦选中的手感。
    `books/transcripts/环境画卷/青创 一 1 7月25日 上午9点10分.srt`（单个空格）。
    应显示：解析出 **1,676 个字幕段**、0 错误、0 警告；「规范化后名称一致，自动配对成立」。
 4. 点「③ 导入并进入校对工作台」。导入只读取音频首尾各 64KB 计算身份指纹；原始识别层为只读层（每段灰色底小字）。
-5. 逐段播放（PRD V1.0.2）：点击任一行非操作区域或聚焦其文本框 → 若在播放先暂停，选中该段并精确定位到段首（不自动播放）；
+5. 逐段播放（PRD V1.0.2）：点击任一行非操作区域 → 选中该段并精确定位到段首（不自动播放）；聚焦当前播放段文本框 → 只在精确打断位置暂停（V1.1.4 AC-067），不回段首；
    行内「▶ 播放」→ 从该段段首播放，再次点击「⏸ 暂停」停在当前位置（不回段首）；到段尾自动暂停并稳定在段尾，绝不串入下一段；
    同段段内恢复按自动回退且不早于段首；双击时间码等价于该行播放/暂停开关；
-   `F8`/底部播放按钮 = 当前段范围感知播放/暂停；`F7`/`F9` 后退/前进 2 秒且钳制在当前段内；
+   `F8`/行内播放/暂停按钮 = 当前段范围感知播放/暂停；`F7`/`F9` 后退/前进 2 秒且钳制在当前段内；
    0.80× 变速不变调；`Ctrl+L` 循环当前段（唯一的段尾回段首继续模式；换段自动解除旧循环）；
    行内「确认本段」只确认被点击的段；`Ctrl+Enter` 确认当前选中段并定位下一未校对段段首（不自动播放）。
 6. 保存：编辑任一段 → 顶栏「↻ 保存中…」→ 约 0.5 秒「✔ 已保存 HH:MM:SS」。
@@ -136,7 +137,7 @@ tingproof/
 │  ├─ fileWrite.ts    pick → 写（失败 abort，不产生半份文件）→ 回读；下载降级
 │  └─ audioSource.ts  音频重定位（句柄/会话文件 + 指纹验证）
 ├─ src/store/     客户端仓库、服务端 API 适配与旧 IndexedDB 迁移适配层（生产事实源为服务端 API）
-│  ├─ remoteRepo.ts   生产/dev 服务端 API 仓库（revision/409/不可达保护；请求携带审计来源头）
+│  ├─ remoteRepo.ts   生产/dev 服务端 API 仓库（revision/409/不可达保护；请求携带审计来源头；预筛五方法）
 │  ├─ clientIdentity.ts  持久非实名客户端实例 ID（localStorage；审计 clientId 来源，非真人身份）
 │  ├─ repo.ts         仓库门面（按环境选择 remote；测试/迁移显式使用 IndexedDB）
 │  ├─ idbRepo.ts      旧 IndexedDB 适配器（仅测试与迁移来源）
@@ -144,12 +145,16 @@ tingproof/
 │  ├─ saveCoordinator.ts  保存协调器（去重、防抖、失败保留队列可重试、状态可订阅）
 │  └─ types.ts        三层文稿数据模型 + 富审计事件类型（V0.1 实现前两层）
 ├─ server/        服务端（node:sqlite 单文件 + WAL）
-│  ├─ sqliteStore.ts  项目/片段/疑点/审计持久化；schema version（PRAGMA user_version）驱动的
-│  │                  原地幂等迁移；集中式 appendAudit 富审计写入（与数据/revision 同事务）
+│  ├─ sqliteStore.ts  项目/片段/疑点/审计/预筛持久化；schema version（PRAGMA user_version）驱动的
+│  │                  原地幂等迁移（v3：issues 机器来源列 + prefilter 三表 + 批次 claim 列）；
+│  │                  集中式 appendAudit 富审计写入（与数据/revision 同事务）；原子确认
 │  ├─ apiHandler.ts   /api 路由：CRUD + revision/409 + 客户端来源校验 + 只读审计查询
+│  │                  + 原子确认 + 预筛五端点（config/runs/next/retry/cancel）
+│  ├─ prefilterModel.ts  OpenAI-compatible 模型适配器（环境变量密钥、超时/限流退避重试、
+│  │                     错误脱敏）+ 候选严格白名单校验 + 稳定 candidateKey
 │  └─ main.ts         独立生产服务（静态 dist + /api，0.0.0.0）
 ├─ src/audio/usePlayer.ts   播放引擎（rAF 时钟、变速不变调、自动回退、A-B/整段循环）
-└─ src/ui/        导入页 / 工作台 / 片段列表 / 时间轴 / 疑点面板 / 导出对话框 / 改键面板
+└─ src/ui/        导入页 / 工作台 / 片段列表 / 时间轴 / 疑点面板 / 预筛面板 / 导出对话框 / 改键面板
 ```
 
 ### 服务端 API 与 ground-truth 审计（PRD V1.1.2 §4.4.6，已实现）
@@ -197,9 +202,9 @@ tingproof/
 - **迁移与 schema 版本**：旧 SQLite 库（audit_events 仅旧 7 列：id、project_id、revision、action、
   object_type、object_id、at；富表 13 列 = 旧 7 列 + 新增 6 列）在打开时原地、幂等、无损迁移
   （`ALTER TABLE ADD COLUMN` 补齐富审计列，不 drop/recreate 表、不丢旧行；旧行新列为 null 并原样
-  返回）；schema 版本记录在 `PRAGMA user_version`（当前 2），重复启动幂等，有真实旧 schema 数据库
+  返回）；schema 版本记录在 `PRAGMA user_version`（当前 3），重复启动幂等，有真实旧 schema 数据库
   探针测试锁定；`audit_events` 建 `(project_id, id)` 索引支撑升序分页。**版本只进不退**：打开数据库
-  先读 `user_version`，高于当前程序支持版本（2）时拒绝打开——版本号、表结构和数据保持不变（不降级、
+  先读 `user_version`，高于当前程序支持版本（3）时拒绝打开——版本号、表结构和数据保持不变（不降级、
   不执行当前 schema DDL），报错提示升级程序；只有低版本才执行迁移。**构造失败释放句柄**：数据库成功
   打开之后的任何初始化异常（读取版本、PRAGMA/SCHEMA/迁移、语句预编译——如不兼容 schema 的旧库）
   都 best-effort 关闭句柄后原样重抛，不泄漏文件描述符。
@@ -219,7 +224,7 @@ tingproof/
    - 有源句柄时用 `isSameEntry` 阻止把导出写到源 SRT / 源 MP3（三态：match 阻止 / clear 放行 / unverifiable 默认阻止）；
    - 无源句柄时界面明确写「无法自动校验，请在保存对话框中不要选择源文件」，不做无法保证的承诺；
    - FS Access 写入失败时调用 `abort()` 丢弃临时内容，不产生“半份文件替换”的含混结果。
-9. **逐段播放与选中/确认策略**（可解释、有测试，PRD V1.0.2）：普通播放只允许当前选中段 `[start_ms, end_ms)`——到 end_ms 自动暂停并把位置稳定在段尾（rAF 主检测 + timeupdate 兜底，段尾分支不再排帧）；循环 region 是唯一「段尾回段首继续」模式且仅当 region 与当前段一致时生效，换段时旧循环自动解除；行内按钮是播放/暂停开关（播放中点击停在当前位置，不回段首；同段段内恢复自动回退不早于段首；换段/段尾/段外从段首开始）；点击行/聚焦文本框 = 选中 + 精确定位 startMs + 暂停旧段（不自动播放）；`Ctrl+Enter` 确认后定位下一未校对段段首（不自动播放）；已确认段再次点击同一按钮为「↶ 取消确认」——
+9. **逐段播放与选中/确认策略**（可解释、有测试，PRD V1.0.2）：普通播放只允许当前选中段 `[start_ms, end_ms)`——到 end_ms 自动暂停并把位置稳定在段尾（rAF 主检测 + timeupdate 兜底，段尾分支不再排帧）；循环 region 是唯一「段尾回段首继续」模式且仅当 region 与当前段一致时生效，换段时旧循环自动解除；行内按钮是播放/暂停开关（播放中点击停在当前位置，不回段首；同段段内恢复自动回退不早于段首；换段/段尾/段外从段首开始）；点击行 = 选中 + 精确定位 startMs + 暂停旧段（不自动播放）；聚焦当前播放段文本框 = 只在精确打断位置暂停并记续播点（AC-067）；`Ctrl+Enter` 确认后定位下一未校对段段首（不自动播放）；已确认段再次点击同一按钮为「↶ 取消确认」——
 有未解决疑点回到「有疑点」、否则回到「校对中」，经保存队列持久化（刷新保持）；
 行内确认/取消确认都会把选中段与活动播放范围切换为「按钮所在行」（不自动播放、不改变播放头、绝不选择下一段）；只有 `Ctrl+Enter` 才前进到下一未校对段。
 行内「⚑ 疑点」为轻量类型选择层（8 类、无预选、单例，Esc/外部/再点按钮仅关闭），选定类型才创建一条 blocking 疑点；
@@ -231,6 +236,19 @@ tingproof/
 10. **受控元数据更新**：音频时长经 `updateMediaDuration` 单独字段写回，刷新后仍可读回（有测试）；持久化路径不依赖渲染期 meta 快照（审计 P1-7：已移除 onDuration 对 metaRef 的本地改写，所有写库字段显式传入）。
 
 ## 5. 审计修复记录
+
+### 第 9 轮（V1.1.4 真实标注反馈与文本预筛，AC-067 至 AC-071）
+
+| # | 需求/审计项 | 实现 | 验证证据 |
+| --- | --- | --- | --- |
+| AC-067 | 真实审计记录：播放中的当前段在文本框聚焦后被写回段首（重复回听） | usePlayer 新增 pauseForEdit + 一次性编辑打断续播点：同段续播从精确打断点且本次回退 0ms；标记在 play() 成功后消费（reject 保留重试）、seek/±2s/循环/换段/段尾/ended/时间轴变化清除；SegmentList 拆分 onLocate（行空白区=精确定位段首）与 onEditorFocus（当前播放段=只暂停）两语义 | `tests/editInterruptResume.test.tsx`（13 例）：精确暂停 ±100ms、无回退续播、一次性消费后回常规回退、各清除路径、play reject 保留与重试、ended 清理、Workbench 聚焦当前段/另一段/行空白区语义分离 |
+| AC-068 | 真实审计记录：两次段落确认后分别紧跟人工 resolve_issue（重复点已解决） | 服务端 `POST /segments/:id/confirm`：一次事务确认段（含 correctedText 草稿）+ 按稳定 issueId 顺序解决本段全部 open 疑点（同一确认时间）；revision 只 +1；confirm_segment + resolve_issue 共享 revision/时间戳，metadata.cause=segment_confirm；no-op/409/注入子写失败（SQL trigger）整体回滚；idbRepo 镜像实现；Workbench 经 SaveCoordinator 同标签入队（替换 pending 文本保存避免 409）+ flush 立即执行 | `tests/confirmAtomic.test.ts`（7 例）、`tests/confirmIdb.test.ts`（3 例）、`tests/workbenchConfirm.test.tsx`（8 例，含自动解决后未解决计数消失/撤销不重开/持久层复核）、`tests/confirmFailure.test.tsx`（1 例失败路径） |
+| AC-069 | 文本预筛输入与候选校验 | 模型只收冻结的 segmentId/cueNo/originalText；validatePrefilterResponse 严格白名单（顶层仅 items、六字段、枚举/长度、原文逐字子串、单段≤3、批内 candidateKey 去重、未知字段/顶层拒绝）；合法候选 → warning 级 machine_prefilter 疑点（machine_metadata 含 reason），正文/段状态不变；冻结后已确认段候选记 rejected 不产生 open 疑点 | `tests/prefilterServer.test.ts`：输入键集合断言、合法候选落库、7 类非法全部拒绝计数 + rejected 行持久化、整批失败可重试、确认后冻结候选拒绝 |
+| AC-070 | 批次幂等与恢复 | 批次短事务原子 claim（queued/failed→running，CAS；并发第二请求不调模型不跳批）；close() 释放本实例认领 + 10 分钟租约兜底回收崩溃残留；inputHash 幂等（同项目成功批次直接复制不调模型）；run 级 scope 复用；已删除/已解决候选按 candidateKey 项目级去重不复活不重开；取消保留成功批次——含取消竞态：模型 in-flight 时取消，当前批完成后 recompute 保留 run=cancelled（计数照常更新），不伪装完成 | 同上文件：3 批 run 重启续跑（批 1 不重调）、Promise.all 并发模型只调 1 次、store close/reopen 与租约回收、21 段 inputHash 复制、删除不复活/解决不重开、取消保留 processed、取消竞态（deferred 模型：取消后当前批 succeeded、后续 cancelled、run cancelled、模型只调一次） |
+| AC-071 | 来源、安全与降级 | config 只回 available/provider/model/promptVersion；API key 只在服务端环境变量、不入库/回传/日志/审计；机器 create_issue 审计 source=machine_prefilter、metadata 含 provider/model/promptVersion/sourceTextHash/runId/batchId/candidateKey/confidence、不含提示词/密钥/整批正文；未配置 503+环境变量名提示；预筛推进 revision 后旧 revision 手动写 409 | 同上文件：config 脱敏断言、审计来源完整性与敏感信息排除、503、revision 409；`tests/prefilterUi.test.tsx`：未配置降级（无 run 请求）、运行循环/重试/取消、机器建议 ×N 与疑点卡展示 |
+| 迁移 | schema v2→v3：issues 增 origin/machine_metadata（旧行 human/null）+ 预筛三表；真实库曾处于中间态（user_version=3 但缺 claim 列） | migrateSchema 按列存在性幂等补齐（不依赖版本号跳过）；SCHEMA_VERSION=3 只进不退；deleteProject 级联清理预筛数据 | 同上文件：构造 v3 旧 14 列库 → 补 claim 列、数据不变、claim 可用、重复构造幂等 |
+| 复审 P0-1 | 疑点刷新并发协调存在真实缺陷：合并决策写在 React setState 更新器内（延迟执行）而 journal 清理在 finally 同步先行——旧快照在保护失效后覆盖本地结果；confirm-resolved 被无条件永久保护（新 GET 无法接受跨设备更新/删除）；已 ack mutation 对"ack 前发起、可能漏读该写入"的在途 GET 无保护；pending 集合无 per-mutation token（旧保存成功会错误 ack 更新 mutation）；服务端缺失的本地疑点被无条件保留（跨设备删除永不同步）；**第 10 轮追加**：noteConfirmed 无条件覆盖 journal + 删除 pending token——确认请求在途期间更晚的本地 delete/resolve 会被 confirm 响应打穿，删除保存未成功/失败期间服务端旧行复活本地删除 | 重做为独立协调器 `src/store/issueSync.ts`：单调时钟全序 + per-ID journal（local/confirmed + ackedClock）+ per-mutation pending token；保存 op 开始时捕获 token，成功仅当 token 仍是最新才 ack（在途旧保存不能清新 mutation，失败保持 pending）；confirm 原子结果不进 pending、只保护 confirm 前发起的旧读（非永久）；**第 10 轮**：confirm 响应到达时若该 ID 有更晚的本地 pending mutation，保留其 local 条目与 token（不覆盖/不 ack/不删除），由该保存最终落盘收敛，仅最新 save token 成功才 ack；已 ack 条目按 `ackedClock > read.clock` 精确保护可能漏读的在途读；合并决策在响应到达时同步冻结（freezeDecisions，绝不放进延迟执行的更新器）；仅最新 GET 应用、旧 GET 丢弃；未 touched 完全以服务端为准（含缺失即跨设备删除）；journal 按读取边界清理无泄漏 | `tests/issueSync.test.ts`（11 例协调器确定性单测：旧 ack/新 pending/confirm 不覆盖 pending（第 10 轮）/confirm 在途本地删除合并层/ack 前后读取边界/journal 清理/读取代次/合并纯函数）；`tests/issuesRefreshRace.test.tsx`（9 例真实 deferred 竞态：双 GET 并发反序断言调用=2、pending 中 resolve 与 create 各自等 upsertIssue 真正成功（deferred 完成信号）后释放不回滚并精确断言完整参数、mutation 先于 GET 且保存 pending 不覆盖、同 issue 旧保存在途→新 mutation→旧 ack 不清新 pending 最终保存最新、confirm 保护旧读且新 GET 可删除、confirm 在途本地删除→deleteIssue 挂起→失败→重试成功全程不复活（已用旧缺陷注入验证该例确实失败）、删除不复活、跨设备删除同步；精确断言 upsertIssue/deleteIssue/confirmSegment 参数） |
+| 复审 P1-4/P1-5 | 预筛 latest 错误恢复与取消竞态收尾：latest 失败后同面板显式 start 成功需清旧错误；cancel 后迟到已落库批次只刷新 issues 不刷新 latest 计数；旧 GET/旧 operation 迟到不得清新错误；**第 10 轮追加**：cancel 请求响应挂起期间迟到 next processed=true 先返回——cancel 状态未记录导致同步被跳过，随后 cancel 响应携带 materialize 前旧快照，UI 永久停在旧计数 | runLoop 成功取得权威 run 时清 latestRunError（仅当前操作）；旧操作迟到落库（processed=true）→ issues 只读刷新一次 + cancel 点击即记录状态（含响应未返回的在途取消）：cancel 响应已落地且仍是最新操作且 UI 仍指向该 cancelled run 时只读 latest 一次应用最终 processed/created/reused/rejected（status 显式钉死 cancelled）；**第 10 轮**：迟到批次先于 cancel 响应到达 → 标记 syncRequested，cancel 响应落地后补做恰好一次只读 latest（两种响应顺序合计恰好一次，不重复）；期间有新操作/新 run 绝不覆盖；取消失败清除在途状态；该同步不清除 latestRunError（错误由显式重试或新的当前操作清除） | `tests/prefilterDeferred.test.tsx` 5 例：latest 首败→状态读取失败→同面板 start 成功→完成态且旧错误块消失；旧 GET 迟到 resolve 与旧 operation 迟到落库均不清新错误（取消 run 计数照常同步、latest 恰好 +1）；cancel 后迟到批次 issues +1/latest +1/最终计数 4/4 且不轮询不 create 不额外 next；**cancel 响应反序**（cancel 挂起→迟到 next 先返回 issues +1 且 latest 零调用→cancel stale 0/4 快照返回→恰好补一次 latest 恢复 4/4 且保持 cancelled）；取消后新 run 完成不被旧迟到批次覆盖（latest 零调用）；`tests/confirmDeferredRace.test.tsx` 3 例：行内 advance:false 与 **Ctrl+Enter advance:true** 双路径 confirm 在途 T1→T2——精确断言 updateSegment(T2,"editing")、文本 T2、目标段未 confirmed、行内路径选中不被切换 / Ctrl+Enter 路径不选中/定位/聚焦下一段、confirm 参数为 T1；A pending+B-old 被替换精确保存 T2 且 confirmSegment=0 |
 
 ### 第 8 轮（删除历史记录，PRD V1.1.3 / AC-066）
 
@@ -265,7 +283,7 @@ tingproof/
 | 1 | `audit_events` 只有 action/object/time，无法还原人工标注过程（马上要人工标注一个文件并形成机器预筛评估的 ground truth） | 升级为追加式富审计日志：集中式 `appendAudit` 与数据写入/revision 增长同事务；新增 `client_id/source/before_json/after_json/changed_fields_json/metadata_json` 列 + `(project_id, id)` 分页索引；疑点动作分类（create/update/resolve/reopen/delete，删除前完整 before、after=null）；字幕段按实际前后差异分类（edit_segment_text/confirm_segment/unconfirm_segment/update_segment_timing/update_segment）且 changedFields 准确 | `tests/auditEvents.test.ts`（14 例）：创建/编辑/确认/撤销/疑点全生命周期的动作分类、before/after 完整 SegmentRecord/IssueRecord、originalText 不可改、删除后主表消失但 delete_issue 的 before 仍完整可查询 |
 | 2 | 无账号体系却需要区分事件来源 | 前端 `clientIdentity.ts` 持久非实名 client instance ID（localStorage，`ci-<uuid>`）+ `X-TingProof-Source: web`；服务端严格校验长度/字符（非法 400），缺失诚实回退 unknown/api；文档与实现均声明 clientId 不代表经过认证的人 | `tests/auditEvents.test.ts`：合法记录、非法 400、缺失回退、remoteRepo 生产路径自动携带 |
 | 3 | 审计数据无法被外部消费 | 只读 `GET /api/projects/:id/audit-events?afterId&limit`（1–500 严格校验，404，非 GET 拒绝，升序分页无重复无遗漏）；类型 `AuditEventRecord` 同步到共享 `src/store/types.ts`；remoteRepo 提供 `listAuditEvents` 导出方法 | `tests/auditEvents.test.ts`：参数校验（0/501/非整数/负数均 400）、默认 limit=100、105 事件分页遍历、重启前后遍历结果一致 |
-| 4 | 旧 SQLite 库升级风险（丢旧审计事件/需要重建表） | `PRAGMA user_version` 显式 schema 版本（当前 2）；构造 store 时按列检查 `ALTER TABLE ADD COLUMN` 原地补齐，不 drop/recreate 表；旧行新列保持 null 并原样返回；重复启动幂等 | `tests/auditMigration.test.ts`（3 例）：真实旧 schema 数据库探针（旧 7 列 audit_events + 旧行）→ 迁移无损、旧事件可读（新列 null）、业务数据不变、新写入带完整富审计列、二次/三次启动幂等、新库直接最新 schema |
+| 4 | 旧 SQLite 库升级风险（丢旧审计事件/需要重建表） | `PRAGMA user_version` 显式 schema 版本（该轮当时为 2；当前为 3）；构造 store 时按列检查 `ALTER TABLE ADD COLUMN` 原地补齐，不 drop/recreate 表；旧行新列保持 null 并原样返回；重复启动幂等 | `tests/auditMigration.test.ts`（3 例）：真实旧 schema 数据库探针（旧 7 列 audit_events + 旧行）→ 迁移无损、旧事件可读（新列 null）、业务数据不变、新写入带完整富审计列、二次/三次启动幂等、新库直接最新 schema |
 | 5 | 失败路径可能污染审计（409/校验拒绝也记事件） | 只在成功事务内追加；幂等删除不存在疑点/media 相同值重复提交不产生事件、不增长 revision | `tests/auditEvents.test.ts`：409、未知字段 400、非法疑点 400、删除幽灵疑点、media no-op 均零事件且 revision 不变 |
 
 ### 第 5 轮（真实浏览器布局验收）
@@ -315,13 +333,13 @@ tingproof/
 
 | 动作 | 默认键 | 说明 |
 | --- | --- | --- |
-| 播放 / 暂停（当前段） | `F8` 或底部按钮 | 范围感知：播放中暂停在当前位置（不回段首）；同段段内恢复自动回退（不早于段首）；段尾/段外从段首 |
+| 播放 / 暂停（当前段） | `F8` 或行内播放/暂停按钮 | 范围感知：播放中暂停在当前位置（不回段首）；同段段内恢复自动回退（不早于段首）；段尾/段外从段首 |
 | 后退 2 秒 | `F7` | 钳制在当前段内 |
 | 前进 2 秒 | `F9` | 钳制在当前段内 |
 | 上一段 / 下一段 | `Alt` + `←` / `→` | 选中并精确定位到段首；正在播放先暂停 |
 | 确认当前选中段并前进 | `Ctrl` + `Enter` | 定位下一未校对段段首，不自动播放 |
 | 确认 / 取消确认（行内按钮） | — | 只作用于被点击的段，与播放位置无关；已确认段再次点击即撤销确认 |
-| 选中某段 | 点行非操作区域 / 聚焦该行编辑器 | 精确定位到该段 startMs；不自动播放；人工滚动列表即暂停跟随，显式定位/播放或「回到播放点」恢复 |
+| 选中某段 | 点行非操作区域 | 精确定位到该段 startMs；不自动播放；人工滚动列表即暂停跟随，显式定位/播放或「回到播放点」恢复 |
 | 播放 / 暂停（行内开关） | 点行内 `▶ 播放` / `⏸ 暂停` | 双击时间码等价；按钮文案与可访问名称随状态切换 |
 | 循环当前段 | `Ctrl` + `L` 或行内 `⭯ 循环` | 再按一次解除；唯一的段尾回段首继续模式；换段自动解除旧循环 |
 | 创建疑点 | `Ctrl` + `?` | 直接为当前选中段创建「听不清 / 阻塞」疑点（行内 ⚑ 为先选类型再创建） |
@@ -342,6 +360,8 @@ tingproof/
 - **列表渲染**：已移除 `content-visibility` 估算高度（其未渲染行尺寸估计会让原生滚动条 thumb 漂移、拖动时跟不上鼠标，第 8 轮审计按正确性优先移除）；1,676 段全量渲染初始开销略高但滚动几何稳定；PRD 的 50 万段级虚拟滚动属于 V1.0 性能项。
 - **持久化边界**：项目、SRT、校对文本、确认状态、疑点和播放进度持久化在服务端 `data/tingproof.db`；清除浏览器站点数据不会删除服务端项目。源音频不上传，服务端数据目录仍需纳入主机备份。
 - **项目删除为硬删除（V1.1.3）**：导入页「删除」二次确认后服务端项目业务数据立即移除且无法撤销（`delete_project` 审计行保留可追溯）；无回收站/软删除——该能力为 PRD 后续版本范围。
+- **机器预筛需要服务端模型配置（V1.1.4）**：在服务端环境设置 `TINGPROOF_LLM_BASE_URL`（OpenAI-compatible 基地址，如本地 `http://127.0.0.1:11434/v1`）、`TINGPROOF_LLM_MODEL`、可选 `TINGPROOF_LLM_API_KEY`（本地无鉴权服务可留空）；未配置时入口显示「机器预筛未配置」，人工链路完全可用。模型适配器默认超时 60s、429/5xx/超时按 500ms/1500ms 退避重试两次。生产 provider/model 选型按 PRD C11 待真实联调确认；本轮自动化测试全部使用注入假模型，未对真实收费模型发起任何请求。
+- **预筛范围与模型边界（V1.1.4）**：只筛未确认段的原始 ASR 文本（冻结于 run 创建时刻）；模型输出经严格白名单校验，非法候选拒绝并计数（不猜着落库）；机器建议是 warning 级疑点候选，不自动改稿、不自动确认、不代表已校对；提示词版本 `text-suspicion-v1`（任何提示词变化需提升版本）。
 - **编码**：SRT 仅支持 UTF-8 / UTF-8 BOM；检测到非 UTF-8（U+FFFD）会警告。GB18030 自动检测是 PRD 3.1.7 的后续项。
 - **旧版项目数据**：第 1 轮样机存入的音频 File 会在启动迁移中自动清除并尽量补齐指纹；正文已不可读的项目在首次重连音频时按「文件名+大小」核对，并要求用户确认建立身份（有明确提示，不静默、不锁死）。迁移为逻辑写回：Chrome 对解除引用的大 Blob 的磁盘回收可能延迟到浏览器关闭/重启（主审计方实测：旧 profile 约 96MB → 2.3MB，重启后 `navigator.storage.estimate().usage = 2,287,929` bytes，1,676 段与原始 SRT 完整，无任何 Blob 正文）；不承诺所有浏览器即时回收。
 - **测试**：自动测试覆盖 SRT 解析/序列化/往返与边界、选中/确认策略、保存协调器（含执行中入队不丢写）、导航护栏、项目身份与音频指纹、v1→v2 迁移、持久化与重启恢复、幂等导入、原始层防覆盖、导出回读与空段阻塞、源文件保护三态、播放偏好应用、真实样本只读回归，以及服务端富审计（动作分类、before/after/changedFields、删除留痕、客户端来源、失败与语义 no-op 零事件、media 分阶段净 no-op 与 changedFields 不重复、跨项目与载荷内重复 issueId 对抗、canonical after、createdAt 不可变、issueCount 快照一致、分页与重启完整性、旧 7 列 schema 数据库原地无损迁移探针、未来 schema 版本拒绝打开、不兼容 schema 构造失败句柄零泄漏、损坏 JSON 明确失败）。真实 <audio> 全链路与 UI 手感无自动化测试，需按 §3 手工验证。
