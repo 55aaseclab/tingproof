@@ -92,3 +92,15 @@ both first connection and partial assignment-list failures.
 ## Built-in distribution
 
 Publish the native application and its scoped data API as a pinned Praxis app. A fresh installation starts with empty private storage. Public source and synthetic tests ship independently of host configuration and records.
+
+## Praxis provider / 工作台供数
+
+Publish the app-owned card and data-source contract. Verify synthetic authorized records, native links, stable revisions, empty/error separation and metadata resolution. Keep storage keys, business records and video provisioning outside this module.
+
+发布由应用维护的卡片与数据源合同，使用合成授权记录验证原生入口、稳定版本、空态与错误区分及元数据解析。供数模块不接触密钥、真实业务记录或视频引擎安装。
+
+## Native assignment links / 原生任务链接
+
+Verify exact assignment scope, original/corrected text, timings, local-only audio, lost-access clearing and no whole-project request or write.
+
+验收准确任务范围、原文与校正稿、时间、本机录音、失权清空，以及无整项目请求和业务写入。

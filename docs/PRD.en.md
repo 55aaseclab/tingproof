@@ -25,3 +25,9 @@ The interface defaults to English, with a persistent Simplified Chinese choice. 
 ## Built-in distribution
 
 Publish the native application and its scoped data API as a pinned Praxis app. A fresh installation starts with empty private storage. Public source and synthetic tests ship independently of host configuration and records.
+
+## Praxis provider
+
+The app owns a version-1 `praxis-provider.mjs` contract for source-backed workbench cards and data-source metadata. Reads use host-supplied authorized callbacks; the provider has no direct filesystem, credential or network access. Preserve native object links, real revisions or stable content hashes, and distinct empty, partial and unavailable results. Personal card handling never modifies shared records. See [provider contract](PRAXIS-PROVIDER.md).
+
+The native `?space=&assignment=` entry reads exactly one authorized assignment and its segments. It retains original/corrected text, timing and status, accepts device-local audio without upload, and clears content on lost access. Assignment read permission does not grant whole-project reads or writes.

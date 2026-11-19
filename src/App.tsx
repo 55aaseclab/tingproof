@@ -1,6 +1,6 @@
 import { useLanguage } from "./ui/LanguageButton.js";
 import { msg } from "./i18n.js";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { resolveAudioFile } from "./core/audioSource.js";
 import {
   getProject,
@@ -10,6 +10,7 @@ import {
 import type { IssueRecord, ProjectMeta, SegmentRecord } from "./store/types.js";
 import { ImportScreen } from "./ui/ImportScreen.js";
 import { Workbench } from "./ui/Workbench.js";
+import { AssignmentWorkbench, assignmentTarget } from "./ui/AssignmentWorkbench.js";
 
 interface WorkbenchState {
   type: "workbench";
@@ -22,6 +23,12 @@ interface WorkbenchState {
 
 export function App() {
   useLanguage();
+  const [assignment, setAssignment] = useState(() => assignmentTarget(window.location.search));
+  useEffect(() => {
+    const changed = () => setAssignment(assignmentTarget(window.location.search));
+    window.addEventListener("popstate", changed);
+    return () => window.removeEventListener("popstate", changed);
+  }, []);
   const [view, setView] = useState<WorkbenchState | { type: "import" }>({ type: "import" });
   const [loadError, setLoadError] = useState<string | null>(null);
   // 会话内音频 File（内存 only，绝不写库）；刷新后消失，工作台会要求重新定位。
@@ -66,6 +73,8 @@ export function App() {
       if (request === openRequest.current) setLoadError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  if (assignment.kind !== "none") return <AssignmentWorkbench key={assignment.kind === "assignment" ? `${assignment.spaceId}:${assignment.assignmentId}` : "invalid-assignment"} target={assignment} />;
 
   if (view.type === "workbench") {
     return (

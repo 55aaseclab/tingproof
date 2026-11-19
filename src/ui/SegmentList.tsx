@@ -23,8 +23,13 @@ import {
   type SegmentStatus,
 } from "../store/types.js";
 
+type DisplaySegment = Omit<SegmentRecord, "projectId">;
+
 interface Props {
-  segments: SegmentRecord[];
+  segments: DisplaySegment[];
+  /** Scoped assignment views reuse the native rows without exposing mutations. */
+  readOnly?: boolean;
+  playbackDisabled?: boolean;
   /** 选中段（用户当前工作段；行内确认不受播放位置影响）。 */
   selectedId: string | null;
   /** 正在播放的段（= 选中段且处于播放状态）；用于行内按钮的动态文案。 */
@@ -59,7 +64,9 @@ interface Props {
 }
 
 interface RowProps {
-  seg: SegmentRecord;
+  seg: DisplaySegment;
+  readOnly: boolean;
+  playbackDisabled: boolean;
   selected: boolean;
   playing: boolean;
   looping: boolean;
@@ -97,6 +104,7 @@ function AutoTextarea({
   onCompositionEnd,
   onFocus,
   ariaLabel,
+  readOnly,
 }: {
   initialText: string;
   externalText: string;
@@ -105,6 +113,7 @@ function AutoTextarea({
   onCompositionEnd: () => void;
   onFocus: () => void;
   ariaLabel: string;
+  readOnly: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const lastKnownRef = useRef(initialText);
@@ -122,8 +131,10 @@ function AutoTextarea({
       className="seg-corrected"
       defaultValue={initialText}
       aria-label={ariaLabel}
+      readOnly={readOnly}
       onFocus={onFocus}
       onChange={(e) => {
+        if (readOnly) return;
         const v = e.target.value;
         lastKnownRef.current = v;
         onDraftChange(v, (e.nativeEvent as InputEvent).isComposing ?? false);
@@ -136,6 +147,8 @@ function AutoTextarea({
 
 const SegmentRow = memo(function SegmentRow({
   seg,
+  readOnly,
+  playbackDisabled,
   selected,
   playing,
   looping,
@@ -213,6 +226,7 @@ const SegmentRow = memo(function SegmentRow({
         initialText={seg.correctedText}
         externalText={seg.correctedText}
         ariaLabel={msg("Corrected text {0}", "校对文本 {0}", formatDisplay(seg.startMs))}
+        readOnly={readOnly}
         onFocus={() => onEditorFocus(seg.segmentId)}
         onDraftChange={(v, composing) => onDraftChange(seg.segmentId, v, composing)}
         onCompositionStart={() => onCompositionStart(seg.segmentId)}
@@ -221,6 +235,7 @@ const SegmentRow = memo(function SegmentRow({
       <div className="seg-actions">
         <button
           onClick={toggle}
+          disabled={playbackDisabled}
           aria-label={playing ? msg("Pause", "暂停") : msg("Play", "播放")}
           title={
             playing
@@ -231,6 +246,7 @@ const SegmentRow = memo(function SegmentRow({
           {playing ? msg("⏸ Pause", "⏸ 暂停") : msg("▶ Play", "▶ 播放")}
         </button>
         <button
+          disabled={playbackDisabled}
           onPointerDown={stopPropagation}
           onClick={(e) => {
             e.stopPropagation();
@@ -242,6 +258,7 @@ const SegmentRow = memo(function SegmentRow({
           ⏪ 2s
         </button>
         <button
+          disabled={playbackDisabled}
           onPointerDown={stopPropagation}
           onClick={(e) => {
             e.stopPropagation();
@@ -252,7 +269,7 @@ const SegmentRow = memo(function SegmentRow({
         >
           ⏩ 2s
         </button>
-        <button
+        {!readOnly && <button
           onClick={() => (isConfirmed ? onUnconfirmRow(seg.segmentId) : onConfirmRow(seg.segmentId))}
           aria-label={isConfirmed ? msg("Undo confirmation", "取消确认") : msg("Confirm segment", "确认本段")}
           title={
@@ -262,8 +279,8 @@ const SegmentRow = memo(function SegmentRow({
           }
         >
           {isConfirmed ? msg("↶ Undo confirmation", "↶ 取消确认") : msg("✓ Confirm segment", "✓ 确认本段")}
-        </button>
-        <div className="issue-trigger-wrap">
+        </button>}
+        {!readOnly && <div className="issue-trigger-wrap">
           <button
             ref={issueTriggerRef}
             data-issue-trigger={seg.segmentId}
@@ -283,8 +300,8 @@ const SegmentRow = memo(function SegmentRow({
               onClose={onCloseMenu}
             />
           )}
-        </div>
-        <button onClick={() => onLoop(seg.segmentId)} title={msg("Loop this segment. Ctrl+L toggles looping.", "循环播放该段时间范围（Ctrl+L）；唯一的段尾回段首继续模式")}>{msg("⭯ Loop", "⭯ 循环")}</button>
+        </div>}
+        <button disabled={playbackDisabled} onClick={() => onLoop(seg.segmentId)} title={msg("Loop this segment. Ctrl+L toggles looping.", "循环播放该段时间范围（Ctrl+L）；唯一的段尾回段首继续模式")}>{msg("⭯ Loop", "⭯ 循环")}</button>
       </div>
     </div>
   );
@@ -292,6 +309,8 @@ const SegmentRow = memo(function SegmentRow({
 
 export function SegmentList({
   segments,
+  readOnly = false,
+  playbackDisabled = false,
   selectedId,
   playingSegmentId,
   unresolvedBySegment,
@@ -322,6 +341,8 @@ export function SegmentList({
         <SegmentRow
           key={seg.segmentId}
           seg={seg}
+          readOnly={readOnly}
+          playbackDisabled={playbackDisabled}
           selected={seg.segmentId === selectedId}
           playing={seg.segmentId === playingSegmentId}
           looping={seg.segmentId === loopSegmentId}
