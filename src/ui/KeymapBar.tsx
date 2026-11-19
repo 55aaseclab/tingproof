@@ -1,0 +1,79 @@
+import { msg } from "../i18n.js";
+/**
+ * 快捷键说明与改键面板。点“改键”后按任意允许的键完成绑定；Esc 取消。
+ */
+import { DEFAULT_KEYMAP, type Keymap, type KeymapApi } from "./useKeymap.js";
+
+const ACTIONS: { key: keyof Keymap; label: string; hint: string }[] = [
+  { key: "playPause", get label() { return msg("Play / pause", "播放 / 暂停"); }, get hint() { return msg("Works while the text editor has focus", "任意焦点可用（含编辑器聚焦时）"); } },
+  { key: "seekBack", get label() { return msg("Back 2 seconds", "后退 2 秒"); }, get hint() { return msg("Moves playback by 2 seconds within the segment", "可配置 0.5–10 秒（V0.1 固定 2 秒）"); } },
+  { key: "seekForward", get label() { return msg("Forward 2 seconds", "前进 2 秒"); }, hint: "" },
+];
+
+export function KeymapBar({ keymap, onClose }: { keymap: KeymapApi; onClose: () => void }) {
+  return (
+    <div className="pairing" style={{ margin: "8px 14px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <strong>{msg("Keyboard shortcuts", "快捷键（默认按 PRD 2.3.4）")}</strong>
+        <button onClick={onClose}>{msg("Collapse", "收起")}</button>
+      </div>
+      <table>
+        <tbody>
+          {ACTIONS.map((a) => (
+            <tr key={a.key}>
+              <th>{a.label}</th>
+              <td>
+                <span className="kbd">{keymap[a.key]}</span>{" "}
+                <button onClick={() => keymap.startListening(a.key)}>
+                  {keymap.listeningFor === a.key ? msg("Press a key…", "按任意键…") : msg("Change key", "改键")}
+                </button>
+              </td>
+              <td className="hint">{a.hint}</td>
+            </tr>
+          ))}
+          <tr>
+            <th>{msg("Previous / next segment", "上一段 / 下一段")}</th>
+            <td>
+              <span className="kbd">Alt</span>+<span className="kbd">←</span> /{" "}
+              <span className="kbd">Alt</span>+<span className="kbd">→</span>
+            </td>
+            <td className="hint">{msg("Fixed", "固定")}</td>
+          </tr>
+          <tr>
+            <th>{msg("Confirm segment and advance", "确认当前段并前进")}</th>
+            <td>
+              <span className="kbd">Ctrl</span>+<span className="kbd">Enter</span>
+            </td>
+            <td className="hint">{msg("Save, confirm, then move to the next unreviewed segment without starting playback", "保存并确认当前段，定位下一未校对段段首（不自动播放）")}</td>
+          </tr>
+          <tr>
+            <th>{msg("Loop selected segment", "循环当前段")}</th>
+            <td>
+              <span className="kbd">Ctrl</span>+<span className="kbd">L</span>
+            </td>
+            <td className="hint">{msg("Press again to end the loop", "再按一次解除")}</td>
+          </tr>
+          <tr>
+            <th>{msg("Create an issue", "创建疑点")}</th>
+            <td>
+              <span className="kbd">Ctrl</span>+<span className="kbd">?</span>
+            </td>
+            <td className="hint">{msg("Add a default issue to the selected segment", "对当前段创建默认疑点")}</td>
+          </tr>
+          <tr>
+            <th>{msg("Leave the text editor", "退出编辑框")}</th>
+            <td>
+              <span className="kbd">Esc</span>
+            </td>
+            <td className="hint">{msg("Shortcuts are paused during text composition", "输入法组合期间快捷键全部不触发")}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div>
+        <button onClick={keymap.resetToDefaults}>{msg("Restore defaults (F7 / F8 / F9)", "恢复默认（F7 / F8 / F9）")}</button>
+        <span className="hint" style={{ marginLeft: 8 }}>{msg("Defaults: ", "当前默认：")}{DEFAULT_KEYMAP.seekBack}{msg(" back · ", " 后退 · ")}{DEFAULT_KEYMAP.playPause}{msg(" play · ", " 播放 ·")}{" "}
+          {DEFAULT_KEYMAP.seekForward}{msg(" forward. Shortcut preferences are saved on this device.", " 前进；快捷键偏好保存在本设备。")}</span>
+      </div>
+    </div>
+  );
+}

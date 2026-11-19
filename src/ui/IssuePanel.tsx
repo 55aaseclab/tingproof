@@ -1,0 +1,190 @@
+import { msg } from "../i18n.js";
+/**
+ * 疑点面板：标记/筛选/跳转/解决/删除；未解决数量由工作台顶栏同步显示。
+ */
+import { useCallback, useState } from "react";
+import { formatDisplay } from "../core/time.js";
+import {
+  ISSUE_TYPE_LABEL,
+  type IssueRecord,
+  type IssueSeverity,
+  type IssueType,
+  type SegmentRecord,
+} from "../store/types.js";
+
+interface Props {
+  issues: IssueRecord[];
+  segments: SegmentRecord[];
+  activeId: string | null;
+  onJumpPlay: (segmentId: string) => void;
+  onResolve: (issueId: string) => void;
+  onDelete: (issueId: string) => void;
+  onCreate: (segmentId: string, type: IssueType, severity: IssueSeverity, note: string) => void;
+}
+
+const SEVERITY_LABEL: Record<IssueSeverity, string> = {
+  get blocking() { return msg("Blocking", "阻塞"); },
+  get warning() { return msg("Warning", "警告"); },
+};
+
+export function IssuePanel({
+  issues,
+  segments,
+  activeId,
+  onJumpPlay,
+  onResolve,
+  onDelete,
+  onCreate,
+}: Props) {
+  const [openOnly, setOpenOnly] = useState(true);
+  const [formFor, setFormFor] = useState<string | null>(null);
+  const [formType, setFormType] = useState<IssueType>("unclear");
+  const [formSeverity, setFormSeverity] = useState<IssueSeverity>("blocking");
+  const [formNote, setFormNote] = useState("");
+
+  /** 打开右侧完整创建表单：沿用上一次选择（V1.0.4 撤销 V1.0.3 的强制类型重置）。 */
+  const openIssueForm = useCallback(() => {
+    if (!activeId) return;
+    setFormFor(activeId);
+  }, [activeId]);
+
+  const visible = openOnly ? issues.filter((i) => i.status === "open") : issues;
+  const unresolvedCount = issues.filter((i) => i.status === "open").length;
+  const blockingCount = issues.filter((i) => i.status === "open" && i.severity === "blocking").length;
+  const segmentById = new Map(segments.map((s) => [s.segmentId, s]));
+
+  return (
+    <aside className="wb-side" aria-label={msg("Issues", "疑点面板")}>
+      <h3>{msg("Issues (open: ", "疑点（未解决 ")}{unresolvedCount}{msg(" · blocking: ", " · 阻塞 ")}{blockingCount}{msg(")", "）")}
+      </h3>
+      <div className="issue-form">
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={openOnly}
+            onChange={(e) => setOpenOnly(e.target.checked)}
+          />{msg("Open only", "只看未解决")}</label>
+        {formFor === null ? (
+          <>
+            <button
+              disabled={!activeId}
+              onClick={openIssueForm}
+              title={msg("Describe an issue in the segment currently playing", "为当前播放所在字幕段创建带表单的疑点")}
+            >{msg("Add an issue with details", "为当前段新建疑点（表单）")}</button>
+            <div className="hint">{msg("The inline flag adds a default issue. Shortcut: ", "行内“⚑ 疑点”按钮会直接创建默认疑点； 快捷键 ")}<span className="kbd">Ctrl</span>+<span className="kbd">?</span>{msg(".", " 同。")}</div>
+          </>
+        ) : (
+          <>
+            <div className="hint">{msg("New issue: ", "新建疑点：")}{formatDisplay(segmentById.get(formFor)?.startMs ?? 0)}
+            </div>
+            <select
+              value={formType}
+              onChange={(e) => setFormType(e.target.value as IssueType)}
+              aria-label={msg("Issue type", "疑点类型")}
+            >
+              {(Object.keys(ISSUE_TYPE_LABEL) as IssueType[]).map((t) => (
+                <option key={t} value={t}>
+                  {ISSUE_TYPE_LABEL[t]}
+                </option>
+              ))}
+            </select>
+            <select
+              value={formSeverity}
+              onChange={(e) => setFormSeverity(e.target.value as IssueSeverity)}
+              aria-label={msg("Severity", "严重级别")}
+            >
+              <option value="blocking">{msg("Blocking (affects final export)", "阻塞（影响最终导出）")}</option>
+              <option value="warning">{msg("Warning", "警告")}</option>
+            </select>
+            <textarea
+              value={formNote}
+              placeholder={msg("Describe the issue, possible wording or what you have tried…", "备注：现象、候选写法、已尝试的听辨方法…")}
+              onChange={(e) => setFormNote(e.target.value)}
+              rows={3}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="primary"
+                onClick={() => {
+                  if (!formFor) return;
+                  onCreate(formFor, formType, formSeverity, formNote);
+                  setFormFor(null);
+                  setFormNote("");
+                }}
+              >{msg("Save issue", "保存疑点")}</button>
+              <button onClick={() => setFormFor(null)}>{msg("Cancel", "取消")}</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="issue-list">
+        {visible.length === 0 ? (
+          <div className="empty-state" style={{ margin: "24px auto" }}>
+            {openOnly ? msg("No open issues.", "当前没有未解决疑点。") : msg("No issues yet.", "还没有任何疑点记录。")}
+          </div>
+        ) : (
+          visible.map((issue) => {
+            const seg = segmentById.get(issue.segmentId);
+            return (
+              <div
+                key={issue.issueId}
+                className={`issue-item ${issue.status === "resolved" ? "resolved" : ""} ${
+                  issue.segmentId === activeId ? "active" : ""
+                }`}
+              >
+                <div className="issue-meta">
+                  <span className={`status-chip ${issue.severity === "blocking" ? "status-questioned" : "status-editing"}`}>
+                    {SEVERITY_LABEL[issue.severity]}
+                  </span>
+                  {issue.origin === "machine_prefilter" && (
+                    <span className="status-chip machine-chip">{msg("Machine suggestion", "机器建议")}{typeof (issue.machineMetadata as Record<string, unknown> | null | undefined)?.confidence ===
+                      "string"
+                        ? ` · ${
+                            {
+                              high: msg("High", "高"),
+                              medium: msg("Medium", "中"),
+                              low: msg("Low", "低"),
+                            }[(issue.machineMetadata as Record<string, unknown>).confidence as string] ?? ""
+                          }`
+                        : ""}
+                    </span>
+                  )}
+                  <span>{ISSUE_TYPE_LABEL[issue.type]}</span>
+                  <span className="cue-time">
+                    {formatDisplay(issue.startMs)} → {formatDisplay(issue.endMs)}
+                  </span>
+                  <span>#{seg?.cueNo ?? "—"}</span>
+                </div>
+                {issue.origin === "machine_prefilter" && issue.machineMetadata && (
+                  <div className="machine-detail hint">
+                    <div>{msg("Flagged excerpt: ", "可疑片段：")}{String((issue.machineMetadata as Record<string, unknown>).suspiciousText ?? "—")}
+                    </div>
+                    {(issue.machineMetadata as Record<string, unknown>).suggestion ? (
+                      <div>{msg("Suggested wording: ", "建议写法：")}{String((issue.machineMetadata as Record<string, unknown>).suggestion)}
+                      </div>
+                    ) : null}
+                    <div>{msg("Reason: ", "机器理由：")}{String((issue.machineMetadata as Record<string, unknown>).reason ?? issue.note)}
+                    </div>
+                  </div>
+                )}
+                {/* P2：机器来源 note=reason，machine-detail 已展示理由——不重复渲染。 */}
+                {issue.note && issue.origin !== "machine_prefilter" && (
+                  <div className="issue-note">{issue.note}</div>
+                )}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => onJumpPlay(issue.segmentId)} title={msg("Select and play from the start of this segment", "选中该段并从其段首播放")}>{msg("⤓ Jump and play", "⤓ 跳转播放")}</button>
+                  {issue.status === "open" && (
+                    <button onClick={() => onResolve(issue.issueId)}>{msg("✔ Resolve", "✔ 已解决")}</button>
+                  )}
+                  <button className="danger" onClick={() => onDelete(issue.issueId)}>{msg("Delete", "删除")}</button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div className="side-footer">{msg("Export shows the number of open issues. Review blocking issues before exporting a final copy.", "导出前会显示未解决疑点数量；阻塞级疑点建议处理完再导出最终稿。")}</div>
+    </aside>
+  );
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-public/
+
+# 服务端数据库与运行数据
+data/
+dist-server/

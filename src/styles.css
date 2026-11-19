@@ -1,0 +1,497 @@
+/* 听校 TingProof V0.1 — 浅色主题
+   设计目标：长时间校稿舒适——用户明确要求白色底：页面与主画布均为 #ffffff，
+   仅边栏/分区保留极浅灰层次；深色正文、清晰焦点环；
+   状态一律「颜色 + 图标 + 文字」三重表达，不依赖单一颜色。 */
+
+:root {
+  --bg: #ffffff;            /* 页面底（用户要求：白色） */
+  --canvas: #ffffff;        /* 主画布（白） */
+  --panel: #f6f8fb;         /* 极浅灰分区（仅侧栏/辅助区） */
+  --panel-2: #ffffff;
+  --border: #d8dfe8;
+  --border-strong: #b9c3d0;
+  --text: #1e293b;          /* 深色正文 */
+  --text-dim: #5b6b7c;
+  --accent: #2563eb;
+  --accent-weak: #dbeafe;
+  --ok: #15803d;
+  --ok-weak: #dcfce7;
+  --warn: #b45309;
+  --warn-weak: #fef3c7;
+  --danger: #b91c1c;
+  --danger-weak: #fee2e2;
+  --purple: #7e22ce;
+  --purple-weak: #f3e8ff;
+  --focus: #2563eb;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+button:hover { background: var(--panel); border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #1d4fd8; }
+button.danger { border-color: #ef9a9a; color: var(--danger); }
+
+input, select, textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+textarea { resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.app { height: 100%; display: flex; flex-direction: column; }
+
+/* ---------- 导入页 ---------- */
+.import-screen {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+.import-screen h1 { font-size: 22px; margin: 0; color: var(--text); }
+.import-screen .sub { color: var(--text-dim); }
+.pick-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.pick-row .fileinfo { color: var(--text-dim); font-size: 13px; word-break: break-all; }
+.pairing {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pairing table { border-collapse: collapse; width: 100%; }
+.pairing td, .pairing th {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 13px;
+  word-break: break-all;
+}
+.pairing th { background: var(--panel); color: var(--text-dim); font-weight: 500; width: 140px; }
+.notice-ok {
+  color: var(--ok);
+  background: var(--ok-weak);
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.notice-warn {
+  color: var(--warn);
+  background: var(--warn-weak);
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.notice-err {
+  color: var(--danger);
+  background: var(--danger-weak);
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 4px 10px;
+  white-space: pre-wrap;
+}
+.error-list {
+  background: var(--danger-weak);
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 14px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 13px;
+  white-space: pre-wrap;
+  color: var(--danger);
+}
+/* 最近项目列表（AC-052）：白底、可访问的独立条目列表 */
+.recent-projects {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.recent-projects h2 { font-size: 16px; margin: 0; color: var(--text); }
+.recent-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.recent-projects .hint { margin: 0; }
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.recent-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.recent-item .recent-info { min-width: 0; }
+.recent-item .recent-name { font-weight: 600; word-break: break-all; }
+.recent-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* 删除二次确认（PRD V1.1.3 / AC-066）：行内展开，占满整行，浅红底突出不可撤销后果。 */
+.delete-confirm {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--danger-weak);
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+}
+.delete-confirm .hint { margin: 0; }
+.delete-confirm-actions { display: flex; gap: 8px; }
+.kbd {
+  display: inline-block;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+/* ---------- 工作台 ---------- */
+.workbench { height: 100%; display: flex; flex-direction: column; }
+.wb-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
+  flex-wrap: wrap;
+}
+.wb-header .title { font-weight: 600; }
+.wb-header .spacer { flex: 1; }
+.save-status {
+  color: var(--text-dim);
+  font-size: 13px;
+  min-width: 170px;
+  text-align: right;
+}
+.save-status.saved { color: var(--ok); background: var(--ok-weak); border-radius: 6px; padding: 2px 8px; }
+.save-status.failed { color: var(--danger); background: var(--danger-weak); border-radius: 6px; padding: 2px 8px; }
+.issue-badge {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--warn-weak);
+}
+.issue-badge.zero { color: var(--ok); background: var(--ok-weak); }
+.tail-gap { color: var(--warn); }
+
+.wb-main { flex: 1; display: flex; min-height: 0; }
+.wb-list {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+  background: var(--canvas);
+}
+
+.seg-row {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  /* 不使用 content-visibility/contain-intrinsic-size：未渲染行用估算高度会改变总高，
+     导致原生滚动条 thumb 位置漂移、拖动时跟不上鼠标（第 8 轮审计，正确性优先）。
+     1.6k 段全量渲染在样机规模下可接受；50 万段级虚拟滚动仍属 PRD V1.0 性能项。 */
+}
+.seg-row.active {
+  background: var(--accent-weak);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.seg-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+.seg-meta .cue-time {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  cursor: default;
+}
+.status-chip {
+  border-radius: 999px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  font-size: 12px;
+  background: var(--panel);
+}
+.status-unreviewed { color: var(--text-dim); }
+.status-editing { color: var(--warn); border-color: #fcd34d; background: var(--warn-weak); }
+.status-questioned { color: var(--danger); border-color: #fca5a5; background: var(--danger-weak); }
+.status-confirmed { color: var(--ok); border-color: #86efac; background: var(--ok-weak); }
+.status-accepted_unclear { color: var(--purple); border-color: #d8b4fe; background: var(--purple-weak); }
+.seg-original {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.seg-corrected {
+  width: 100%;
+  min-height: 44px;
+  max-height: 320px;
+  /* AC-048：高度自适应交给 CSS field-sizing（Chrome 123+），消除逐键 JS 强制布局三段式；
+     不支持的浏览器由最小高度兜底，行为不回退到逐键同步布局。 */
+  field-sizing: content;
+}
+.seg-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+/* AC-047：六个行内按钮统一可见高度与垂直盒模型——固定 CSS 高度 + 行高 1 + 垂直居中，
+   符号字形（⚑/⭯/⏸/▶/⏪/⏩）与 CJK 文字的行盒差异被消除；宽度按文案自适应。
+   打开菜单、按钮文案切换都不改变高度或字幕行高。 */
+/* 根因（第 11 轮审计）：.seg-actions 为 flex，直接子按钮默认 stretch 会等高，
+   但 ⚑ 按钮嵌在 .issue-trigger-wrap 内不参与拉伸 → 高度差。
+   用 display:contents 让包装器退出盒树，六个按钮成为同级 flex item；
+   再叠加固定高度 + 行高 1，保证任意缩放/文案/菜单状态下可见高度一致。 */
+.issue-trigger-wrap { display: contents; }
+.seg-actions button {
+  height: 30px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 行内疑点类型选择层：紧邻触发按钮；白底浮层，不改变行高与滚动布局 */
+.type-menu {
+  /* position:fixed + portal 到 body：菜单完全不参与 .wb-list 滚动几何，
+     不改变 scrollHeight/scrollTop；坐标由 menuPlacement 碰撞感知计算。 */
+  position: fixed;
+  z-index: 60;
+  min-width: 176px;
+  background: var(--canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.type-menu-title { font-size: 12px; color: var(--text-dim); padding: 4px 8px 2px; }
+.type-menu-item { text-align: left; border: none; background: transparent; }
+.type-menu-item:hover { background: var(--panel); }
+.empty-state {
+  margin: 40px auto;
+  text-align: center;
+  color: var(--text-dim);
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wb-side {
+  width: 320px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  min-height: 0;
+}
+.wb-side h3 { margin: 0; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); }
+.issue-list { overflow-y: auto; flex: 1; }
+.issue-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--canvas);
+}
+.issue-item.active { box-shadow: inset 3px 0 0 var(--accent); }
+.issue-item.resolved { opacity: 0.6; }
+.issue-meta { font-size: 12px; color: var(--text-dim); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.issue-note { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.issue-form { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.side-footer { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
+
+/* ---------- 播放条 ---------- */
+.player-bar {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.timeline-wrap { width: 100%; }
+.timeline {
+  width: 100%;
+  height: 64px;
+  display: block;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  cursor: crosshair;
+  background: var(--canvas);
+}
+.player-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.time-display { font-family: ui-monospace, monospace; font-size: 14px; min-width: 220px; color: var(--text); }
+.time-display .total { color: var(--text-dim); }
+.player-controls label { color: var(--text-dim); font-size: 12px; display: flex; gap: 4px; align-items: center; }
+.loop-indicator { color: var(--accent); font-size: 12px; background: var(--accent-weak); border-radius: 6px; padding: 1px 8px; }
+.audio-error { color: var(--danger); font-size: 13px; }
+
+/* ---------- 弹层 ---------- */
+.modal-mask {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 40;
+}
+.modal {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  width: 560px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+}
+.modal h2 { margin: 0; font-size: 16px; }
+.modal .stat-row { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-dim); font-size: 13px; }
+.export-result { font-size: 13px; }
+.export-result.ok { color: var(--ok); background: var(--ok-weak); border-radius: 6px; padding: 6px 10px; }
+.export-result.bad { color: var(--danger); background: var(--danger-weak); border-radius: 6px; padding: 6px 10px; white-space: pre-wrap; }
+
+.keymap-row { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.hint { color: var(--text-dim); font-size: 12px; }
+
+/* ---------- 窄屏（<1100px）：右栏折叠到列表下方 ---------- */
+/* ---------- 窄屏（≤1100px）：双栏改为上下分区 ----------
+   审计 P1（900×900 实测）修复要求：
+   - wb-main overflow:hidden，超长列表绝不允许溢出覆盖下方区域；
+   - wb-list 是独立滚动区（flex:1 + min-height:0 + overflow-y:auto）；
+   - wb-side 固定可见在列表下方（限高），疑点列表自身滚动；
+   - 顶部/播放器不受影响，无横向溢出。 */
+@media (max-width: 1100px) {
+  .wb-main {
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .wb-list {
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+  }
+  .wb-side {
+    flex: 0 1 auto;
+    width: 100%;
+    min-height: 160px;
+    max-height: 45%;
+    overflow: hidden; /* 侧栏内容永不越界覆盖播放条 */
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .issue-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .side-footer { flex: 0 0 auto; }
+  .save-status { min-width: 0; }
+  .time-display { min-width: 0; }
+}
+
+/* 1440×900 与更宽屏：保持双栏，时间轴不超过舒适行高 */
+@media (min-width: 1440px) {
+  .wb-side { width: 360px; }
+}
+
+/* V1.1.4 机器文本预筛（PRD §3.4.9）：白底入口/面板与机器建议标识。 */
+.prefilter-entry { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.prefilter-panel {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.prefilter-panel .hint { margin: 0; }
+.prefilter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.status-chip.machine-chip { color: #681da8; background: var(--purple-soft); border: 1px solid #d9bdf7; }
+.machine-detail {
+  margin: 2px 0;
+  padding: 6px 8px;
+  background: var(--purple-soft);
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+
+.import-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.language-button { min-width: 44px; min-height: 44px; }
