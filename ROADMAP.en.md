@@ -1,6 +1,6 @@
 # TingProof roadmap
 
-Requirements V1.1.11 · [English PRD](docs/PRD.en.md) · [简体中文](ROADMAP.md)
+Requirements V1.1.12 · [English PRD](docs/PRD.en.md) · [简体中文](ROADMAP.md)
 
 ## V1.1.11 · Interface languages
 
@@ -104,3 +104,7 @@ Publish the app-owned card and data-source contract. Verify synthetic authorized
 Verify exact assignment scope, original/corrected text, timings, local-only audio, lost-access clearing and no whole-project request or write.
 
 验收准确任务范围、原文与校正稿、时间、本机录音、失权清空，以及无整项目请求和业务写入。
+
+## V1.1.12 · Scoped native corrections
+
+Verify assignment-only entry and compiled assets, denial of whole-project APIs, read-only default without a submit hint, authorized typed saves with revision/idempotency and actual readback, conflict draft comparison, exact retry after an uncertain save and loss-of-access clearing. Preserve the native renderer and local-only audio boundaries.

@@ -9,3 +9,7 @@
 Verify exact assignment scope, original/corrected text, timings, local-only audio, lost-access clearing and no whole-project request or write.
 
 验收准确任务范围、原文与校正稿、时间、本机录音、失权清空，以及无整项目请求和业务写入。
+
+## V1.1.12 · 原生任务校正权限
+
+验证仅任务权限可打开页面与编译资源、整项目接口仍拒绝、无提交提示默认只读、获授权时按版本/幂等提交并实际回读、冲突草稿比较、未知结果原请求重试和失权清空。保留原生渲染及本机录音边界。

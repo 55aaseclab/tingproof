@@ -30,6 +30,7 @@ interface Props {
   /** Scoped assignment views reuse the native rows without exposing mutations. */
   readOnly?: boolean;
   playbackDisabled?: boolean;
+  allowIssueActions?: boolean;
   /** 选中段（用户当前工作段；行内确认不受播放位置影响）。 */
   selectedId: string | null;
   /** 正在播放的段（= 选中段且处于播放状态）；用于行内按钮的动态文案。 */
@@ -67,6 +68,7 @@ interface RowProps {
   seg: DisplaySegment;
   readOnly: boolean;
   playbackDisabled: boolean;
+  allowIssueActions: boolean;
   selected: boolean;
   playing: boolean;
   looping: boolean;
@@ -149,6 +151,7 @@ const SegmentRow = memo(function SegmentRow({
   seg,
   readOnly,
   playbackDisabled,
+  allowIssueActions,
   selected,
   playing,
   looping,
@@ -280,7 +283,7 @@ const SegmentRow = memo(function SegmentRow({
         >
           {isConfirmed ? msg("↶ Undo confirmation", "↶ 取消确认") : msg("✓ Confirm segment", "✓ 确认本段")}
         </button>}
-        {!readOnly && <div className="issue-trigger-wrap">
+        {!readOnly && allowIssueActions && <div className="issue-trigger-wrap">
           <button
             ref={issueTriggerRef}
             data-issue-trigger={seg.segmentId}
@@ -311,6 +314,7 @@ export function SegmentList({
   segments,
   readOnly = false,
   playbackDisabled = false,
+  allowIssueActions = true,
   selectedId,
   playingSegmentId,
   unresolvedBySegment,
@@ -343,6 +347,7 @@ export function SegmentList({
           seg={seg}
           readOnly={readOnly}
           playbackDisabled={playbackDisabled}
+          allowIssueActions={allowIssueActions}
           selected={seg.segmentId === selectedId}
           playing={seg.segmentId === playingSegmentId}
           looping={seg.segmentId === loopSegmentId}

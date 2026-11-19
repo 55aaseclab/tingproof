@@ -125,6 +125,100 @@ describe("native scoped assignment entry", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:synthetic-audio");
     expect(probes.project).not.toHaveBeenCalled(); expect(probes.write).not.toHaveBeenCalled();
   });
+  it("saves only authorized segment corrections with revision, idempotency and a fresh source readback", async () => {
+    let current = data(); const writes: Record<string, unknown>[] = [];
+    api.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === "/auth/session") return json(session());
+      const input = JSON.parse(String(options?.body));
+      if (input.operation === "submit_corrections") {
+        writes.push(input); current = { ...current, revision: 5, segments: [{ ...current.segments[0] as object, correctedText: "My scoped correction", revisionNo: 3 }] };
+        return json({ revision: 5, segments: [{ segmentId: "segment-a", correctedText: "My scoped correction", revisionNo: 3 }] });
+      }
+      return json({ ...current, permissions: { submit: true } });
+    });
+    render(<App />); const field = await screen.findByDisplayValue("Authorized corrected words");
+    expect((field as HTMLTextAreaElement).readOnly).toBe(false); expect(screen.queryByText("⚑ Issue")).toBeNull();
+    fireEvent.change(field, { target: { value: "My scoped correction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save corrections" }));
+    await screen.findByText("Corrections saved and verified.");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toEqual({ appId: "tingproof", spaceId: "team-a", operation: "submit_corrections", resourceId: "assignment-a", expectedRevision: 4, idempotencyKey: expect.any(String), input: { corrections: [{ segmentId: "segment-a", correctedText: "My scoped correction" }] } });
+    expect(api.mock.calls.filter(call => JSON.parse(String(call[1]?.body || '{}')).operation === "get_assignment")).toHaveLength(2);
+    expect(screen.queryByText(/unsaved corrections/)).toBeNull(); for (const probe of Object.values(probes)) expect(probe).not.toHaveBeenCalled();
+  });
+  it("preserves a conflicting draft and requires a comparison choice before a new revision is submitted", async () => {
+    let current = data(), attempts = 0; const writes: Record<string, unknown>[] = [];
+    api.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === "/auth/session") return json(session());
+      const input = JSON.parse(String(options?.body));
+      if (input.operation === "submit_corrections") {
+        writes.push(input); attempts++;
+        if (attempts === 1) { current = { ...current, revision: 6, segments: [{ ...current.segments[0] as object, correctedText: "Another authorized correction", revisionNo: 3 }] }; return json({ code: "CONFLICT" }, 409); }
+        current = { ...current, revision: 7, segments: [{ ...current.segments[0] as object, correctedText: "My preserved draft", revisionNo: 4 }] }; return json({ revision: 7 });
+      }
+      return json({ ...current, permissions: { submit: true } });
+    });
+    render(<App />); fireEvent.change(await screen.findByDisplayValue("Authorized corrected words"), { target: { value: "My preserved draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save corrections" }));
+    await screen.findByText("Latest correction: Another authorized correction");
+    expect(screen.getByDisplayValue("My preserved draft")).toBeTruthy(); expect((screen.getByRole("button", { name: "Save corrections" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Keep my correction" })); fireEvent.click(screen.getByRole("button", { name: "Save corrections" }));
+    await screen.findByText("Corrections saved and verified.");
+    expect(writes).toHaveLength(2); expect(writes[1].expectedRevision).toBe(6); expect(writes[1].idempotencyKey).not.toBe(writes[0].idempotencyKey);
+  });
+  it("retries an uncertain save with exactly the same key, version and correction body", async () => {
+    let current = data(), attempts = 0; const writes: Record<string, unknown>[] = [];
+    api.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === "/auth/session") return json(session());
+      const input = JSON.parse(String(options?.body));
+      if (input.operation === "submit_corrections") {
+        writes.push(input); attempts++;
+        if (attempts === 1) throw new TypeError("Synthetic network interruption");
+        current = { ...current, revision: 5, segments: [{ ...current.segments[0] as object, correctedText: "Safely retried draft", revisionNo: 3 }] }; return json({ revision: 5, replayed: true });
+      }
+      return json({ ...current, permissions: { submit: true } });
+    });
+    render(<App />); fireEvent.change(await screen.findByDisplayValue("Authorized corrected words"), { target: { value: "Safely retried draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save corrections" }));
+    const retry = await screen.findByRole("button", { name: "Retry same save" }); expect(screen.queryByText("Corrections saved and verified.")).toBeNull();
+    expect((screen.getByDisplayValue("Safely retried draft") as HTMLTextAreaElement).readOnly).toBe(true);
+    fireEvent.click(retry); await screen.findByText("Corrections saved and verified."); expect(writes).toHaveLength(2); expect(writes[1]).toEqual(writes[0]);
+  });
+  it("clears private material after a submission is rejected with HTTP 403", async () => {
+    api.mockImplementation(async (path: string, options?: RequestInit) => path === "/auth/session" ? json(session()) : JSON.parse(String(options?.body)).operation === "submit_corrections" ? json({ code: "FORBIDDEN" }, 403) : json({ ...data(), permissions: { submit: true } }));
+    render(<App />); fireEvent.change(await screen.findByDisplayValue("Authorized corrected words"), { target: { value: "Private unsaved correction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save corrections" })); await screen.findByRole("alert");
+    expect(screen.queryByText("Authorized original words")).toBeNull(); expect(screen.queryByDisplayValue("Private unsaved correction")).toBeNull(); expect(probes.write).not.toHaveBeenCalled();
+  });
+  it("never treats a nonboolean submit hint or a URL parameter as write permission", async () => {
+    window.history.replaceState(null, "", "/apps/tingproof/?space=team-a&assignment=assignment-a&canSubmit=true");
+    api.mockImplementation(async (path: string) => json(path === "/auth/session" ? session() : { ...data(), permissions: { submit: "true" } }));
+    render(<App />); const field = await screen.findByDisplayValue("Authorized corrected words"); expect((field as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save corrections" })).toBeNull(); expect(api).toHaveBeenCalledTimes(2);
+  });
+  it("does not submit another session's draft after a browser identity change", async () => {
+    let sessions = 0; const writes: unknown[] = [];
+    api.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === "/auth/session") return json({ ...session(), csrfToken: ++sessions === 1 ? "synthetic-csrf" : "another-synthetic-session" });
+      const input = JSON.parse(String(options?.body)); if (input.operation === "submit_corrections") writes.push(input);
+      return json({ ...data(), permissions: { submit: true } });
+    });
+    render(<App />); fireEvent.change(await screen.findByDisplayValue("Authorized corrected words"), { target: { value: "Previous identity draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save corrections" })); await screen.findByRole("alert"); expect(writes).toHaveLength(0); expect(screen.queryByDisplayValue("Previous identity draft")).toBeNull();
+  });
+  it("does not report save success until readback succeeds and blocks half-composed text", async () => {
+    let reads = 0;
+    api.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === "/auth/session") return json(session());
+      if (JSON.parse(String(options?.body)).operation === "submit_corrections") return json({ revision: 5 });
+      if (++reads > 1) return json({ code: "APP_UNAVAILABLE" }, 503);
+      return json({ ...data(), permissions: { submit: true } });
+    });
+    render(<App />); const field = await screen.findByDisplayValue("Authorized corrected words");
+    fireEvent.compositionStart(field); fireEvent.change(field, { target: { value: "Unverified correction" } }); expect((screen.getByRole("button", { name: "Save corrections" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.compositionEnd(field); fireEvent.click(screen.getByRole("button", { name: "Save corrections" }));
+    await screen.findByRole("button", { name: "Retry same save" }); expect(screen.queryByText("Corrections saved and verified.")).toBeNull(); expect(screen.getByDisplayValue("Unverified correction")).toBeTruthy();
+  });
   it("renders the same native segment view in Simplified Chinese", async () => {
     setLanguage("zh"); render(<App />); await screen.findByText("Authorized original words");
     expect(screen.getByText(/授权字幕段 · 版本4 · 只读/)).toBeTruthy(); expect(screen.getByLabelText("本机源音频")).toBeTruthy();
