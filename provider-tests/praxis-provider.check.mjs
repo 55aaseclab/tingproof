@@ -104,3 +104,9 @@ test('updates coalesce by object and content changes advance a stable card ident
   assert.equal(after.items[0].id, before.items[0].id);
   assert.notEqual(after.items[0].revision, before.items[0].revision);
 });
+
+test('an application-only path retains its namespace without fabricated host or container bindings', async () => {
+  const value = await getDataInventory({ resolveDataSource: async descriptor => ({ status: 'ready', applicationPath: '/synthetic/application/' + descriptor.id }) });
+  assert.equal(value.status, 'ready'); assert.equal(value.items.length, manifest.dataSources.length);
+  for (const item of value.items) { assert.ok(item.applicationPath.startsWith('/synthetic/application/')); assert.equal(item.hostPath, undefined); assert.equal(item.containerPath, undefined); }
+});

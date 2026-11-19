@@ -104,9 +104,9 @@ export async function getDataInventory(context) {
       const resolved = await context.resolveDataSource(structuredClone(source));
       if (!resolved) throw new Error('UNRESOLVED_SOURCE');
       for (const [index, value] of (Array.isArray(resolved) ? resolved : [resolved]).entries()) {
-        const { hostPath, containerPath, volumeName, storageKey, status, description } = value;
+        const { applicationPath, hostPath, containerPath, volumeName, storageKey, status, description } = value;
         items.push({ id: Array.isArray(resolved) ? `${source.id}:${value.id || index}` : source.id, appId: metadata.appId, label: source.label, labels: source.labels, kind: source.kind, status: status || 'ready',
-          ...(hostPath ? { hostPath } : {}), ...(containerPath ? { containerPath } : {}), ...(volumeName ? { volumeName } : {}), ...(storageKey ? { storageKey } : {}), ...(description || source.description ? { description: description || source.description } : {}) });
+          ...(applicationPath ? { applicationPath } : {}), ...(hostPath ? { hostPath } : {}), ...(containerPath ? { containerPath } : {}), ...(volumeName ? { volumeName } : {}), ...(storageKey ? { storageKey } : {}), ...(description || source.description ? { description: description || source.description } : {}) });
       }
     } catch { errors.push({ id: source.id, code: 'DATA_SOURCE_UNAVAILABLE' }); items.push({ id: source.id, appId: metadata.appId, label: source.label, labels: source.labels, kind: source.kind, status: 'unavailable' }); }
   }

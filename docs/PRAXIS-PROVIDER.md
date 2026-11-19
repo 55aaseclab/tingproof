@@ -29,3 +29,7 @@ There is no new public HTTP metadata route. The module is loaded by a trusted ho
 模块不增加公开 HTTP 路径，也不直接访问文件、环境变量、存储或网络。宿主负责原生会话或既有签名服务验权。运行镜像需包含模块，不安装或调用视频后端。使用 `npm run test:provider` 与原生测试验证，夹具全部为虚构资料。
 
 原生任务入口 `/apps/tingproof/?space=<space>&assignment=<id>` 使用本人会话和既有按资源授权的 `get_assignment`，展示获授权的原文、校正稿、时间和状态。任务读取不授予整项目读取、导出、校正或原始录音下载。选择本机录音仅保留会话内存、不上传；失去权限时清空任务。
+
+When only the app namespace is known, retain `applicationPath`; do not label it as a host or container path without a verified binding.
+
+只知道应用内位置时保留 `applicationPath`；没有核验绑定时，不将它标作宿主机或容器路径。
