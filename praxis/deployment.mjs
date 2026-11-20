@@ -1,6 +1,8 @@
+import { createDemoIntegration } from './demo.mjs';
 import { createStackIntegration } from './stack.mjs';
 import { localCompose } from './local-compose.mjs';
 export function createDeploymentIntegration() { return {
+  demo: createDemoIntegration(),
   unsignedProbe: { operation: 'list_assignments', resourceId: 'assignments' },
   stack: createStackIntegration(),
   localCompose,
