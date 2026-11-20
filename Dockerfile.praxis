@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+
+# Build this application from its own repository context.
+FROM ${NODE_IMAGE} AS base
+ARG PRAXIS_UID=1000
+ARG PRAXIS_GID=1000
+WORKDIR /app
+ENV NODE_ENV=production HOST=127.0.0.1
+RUN groupmod -o -g "${PRAXIS_GID}" node && usermod -o -u "${PRAXIS_UID}" node \
+    && mkdir -p /app /data /data/home && chown -R node:node /app /data /home/node
+USER node
+
+FROM base AS tingproof-build
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund
+COPY --chown=node:node src/ ./src/
+COPY --chown=node:node server/ ./server/
+COPY --chown=node:node index.html tsconfig.json vite.config.ts vite-plugin-tingproof-api.ts ./
+RUN npm run build
+RUN node_modules/.bin/vite build --base /apps/tingproof/ --outDir dist-public
+
+FROM base AS tingproof
+COPY --from=tingproof-build --chown=node:node /app/package.json /app/package-lock.json ./
+COPY --from=tingproof-build --chown=node:node /app/node_modules/ ./node_modules/
+COPY --from=tingproof-build --chown=node:node /app/dist/ ./dist/
+COPY --from=tingproof-build --chown=node:node /app/dist-public/ ./dist-public/
+COPY --from=tingproof-build --chown=node:node /app/dist-server/ ./dist-server/
+COPY --chown=node:node praxis-provider.mjs ./
+COPY --chown=node:node praxis/native-entry.mjs ./praxis/native-entry.mjs
+ENV PORT=15173 TINGPROOF_DATA_DIR=/data
+EXPOSE 15173
+CMD ["node", "dist-server/main.js"]

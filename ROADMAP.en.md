@@ -108,3 +108,7 @@ Verify exact assignment scope, original/corrected text, timings, local-only audi
 ## V1.1.12 · Scoped native corrections
 
 Verify assignment-only entry and compiled assets, denial of whole-project APIs, read-only default without a submit hint, authorized typed saves with revision/idempotency and actual readback, conflict draft comparison, exact retry after an uncertain save and loss-of-access clearing. Preserve the native renderer and local-only audio boundaries.
+
+## App-owned Praxis integration
+
+This app owns its reviewed `praxis-integration.mjs`: native entry policy, typed business operations and MCP guidance where supported. Praxis loads that declaration from the installed source and retains authorization, signing, policy leases and audit. Installation does not grant access or start a backend. Existing native interfaces, data ownership and recovery boundaries remain in force.
