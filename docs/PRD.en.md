@@ -2,7 +2,9 @@
 
 English current contract · [简体中文 and detailed requirements](听校_PRD_V1.0.0.md)
 
-Version: V1.1.12
+App release: 0.1.7
+
+Requirements revision: V1.1.12
 
 Let a reviewer listen to an audio source while checking timestamped subtitle segments and produce a corrected transcript. The user controls the final correction and can return to the relevant source segment.
 

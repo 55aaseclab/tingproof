@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "manifest": "./praxis-app.json",
+      "id": "tingproof-local",
+      "url": "http://127.0.0.1:5173/"
+    }
+  ]
+}

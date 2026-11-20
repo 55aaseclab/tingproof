@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "tingproof",
+  "version": "0.1.7",
+  "kind": "app",
+  "name": "TingProof",
+  "description": "Audio proofreading",
+  "labels": {
+    "en": {
+      "name": "TingProof",
+      "description": "Audio proofreading"
+    },
+    "zh": {
+      "name": "听校",
+      "description": "音频听校"
+    }
+  },
+  "icon": "public/praxis-icon.svg",
+  "iconAliases": [
+    "/tingproof-icon.svg"
+  ],
+  "path": "/",
+  "port": 5173,
+  "documents": {
+    "prd": {
+      "en": "docs/PRD.en.md",
+      "zh": "docs/听校_PRD_V1.0.0.md"
+    }
+  }
+}
